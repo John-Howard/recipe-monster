@@ -7,6 +7,10 @@ import { openDb, Store } from '../server/db.js';
 import { generatePlan, rerollSlot } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
 import { lanUrls } from '../server/index.js';
+import { downloadCover, findCover, isLocalCover } from '../server/covers.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('index parser handles headings, sub-entries, wraps, markers and OCR digits', () => {
   const out = parseIndexText(`INDEX
@@ -102,4 +106,77 @@ test('lanUrls scans interfaces with http, or https when TLS is on', () => {
   const tls = lanUrls({ env: { TLS_CERT: 'c', TLS_KEY: 'k' }, port: 3000 });
   assert.ok(tls.every((u) => u.startsWith('https://')));
   assert.equal(tls.length, plain.length);
+});
+
+const imgRes = (url, { type = 'image/jpeg', size = 2048, ok = true } = {}) => ({
+  ok,
+  url,
+  headers: { get: () => type },
+  arrayBuffer: async () => new ArrayBuffer(size),
+});
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'covers-'));
+
+test('isLocalCover recognises local paths', () => {
+  assert.ok(isLocalCover('/covers/a.jpg'));
+  assert.ok(!isLocalCover('https://x.com/a.jpg'));
+  assert.ok(!isLocalCover(''));
+});
+
+test('downloadCover saves allowed images and upgrades http', async () => {
+  const dir = tmpDir();
+  const seen = [];
+  const fetch = async (u) => (seen.push(u), imgRes(u));
+  const url = await downloadCover('http://books.google.com/x?zoom=1', dir, { fetch });
+  assert.match(url, /^\/covers\/[\w-]+\.jpg$/);
+  assert.ok(seen[0].startsWith('https://books.google.com/'));
+  assert.ok(fs.existsSync(path.join(dir, path.basename(url))));
+});
+
+test('downloadCover rejects disallowed hosts, bad types, sizes, failures and redirects', async () => {
+  const dir = tmpDir();
+  const never = async () => assert.fail('should not fetch');
+  assert.equal(await downloadCover('https://evil.com/a.jpg', dir, { fetch: never }), null);
+  assert.equal(await downloadCover('https://books.google.com.evil.com/a.jpg', dir, { fetch: never }), null);
+  assert.equal(await downloadCover('/covers/a.jpg', dir, { fetch: never }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async (u) => imgRes(u, { type: 'text/html' }) }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async (u) => imgRes(u, { size: 100 }) }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async (u) => imgRes(u, { size: 6e6 }) }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async (u) => imgRes(u, { ok: false }) }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async () => { throw new Error('boom'); } }), null);
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: async () => imgRes('https://ia800.us.archive.org/a.jpg') }) !== null, true);
+  assert.equal(fs.readdirSync(dir).length, 1);
+});
+
+test('findCover falls back from cover_url to isbn to title search', async () => {
+  const dir = tmpDir();
+  const calls = [];
+  const fetch = async (u) => {
+    calls.push(u);
+    if (u.includes('search.json')) return { ok: true, url: u, json: async () => ({ docs: [{ cover_i: 42 }] }) };
+    if (u.includes('/b/id/42-L.jpg')) return imgRes(u);
+    return imgRes(u, { ok: false });
+  };
+  const url = await findCover({ cover_url: 'https://books.google.com/x', isbn: '9780241446300', title: 'Salt Fat', authors: 'Samin Nosrat, Other' }, dir, { fetch });
+  assert.ok(isLocalCover(url));
+  assert.equal(calls[0], 'https://books.google.com/x');
+  assert.ok(calls[1].startsWith('https://covers.openlibrary.org/b/isbn/9780241446300-L.jpg'));
+  const search = calls.find((c) => c.includes('search.json'));
+  assert.ok(search.includes('title=Salt+Fat') && search.includes('author=Samin+Nosrat'));
+  assert.equal(await findCover({ title: 'X' }, dir, { fetch: async (u) => ({ ok: true, url: u, json: async () => ({ docs: [] }) }) }), null);
+});
+
+const redirect = (location) => ({ ok: false, status: 302, url: '', headers: { get: () => location } });
+
+test('downloadCover validates redirect targets before requesting them', async () => {
+  const dir = tmpDir();
+  const seen = [];
+  const bad = async (u) => (seen.push(u), redirect('http://192.168.1.1/x.jpg'));
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: bad }), null);
+  assert.deepEqual(seen, ['https://covers.openlibrary.org/a']);
+
+  const good = async (u) => (u.includes('archive.org') ? imgRes(u) : redirect('https://ia800.us.archive.org/x.jpg'));
+  assert.ok(isLocalCover(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: good })));
+
+  const loop = async () => redirect('https://archive.org/again');
+  assert.equal(await downloadCover('https://archive.org/a', dir, { fetch: loop }), null);
 });

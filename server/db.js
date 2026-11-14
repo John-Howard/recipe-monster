@@ -123,6 +123,10 @@ export class Store {
     return b;
   }
 
+  setBookCover(id, url) {
+    this.db.prepare('UPDATE books SET cover_url = ? WHERE id = ?').run(url, id);
+  }
+
   saveBook(data, id = null) {
     const fields = ['title', 'subtitle', 'authors', 'isbn', 'publisher', 'year', 'cover_url', 'colour', 'notes'];
     const vals = fields.map((f) => String(data[f] ?? '').trim());
