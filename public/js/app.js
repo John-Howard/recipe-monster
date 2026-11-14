@@ -4,7 +4,10 @@ import {
 } from './ui.js';
 import { mountScanner } from './scanner.js';
 
-const MEALS = ['breakfast', 'lunch', 'dinner', 'dessert'];
+const MEALS = ['breakfast', 'lunch', 'starter', 'dinner', 'dessert'];
+const SIDEBAR_MEALS = ['breakfast', 'lunch', 'dinner'];
+const MEAL_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', starter: 'Starter', dinner: 'Main', dessert: 'Pudding' };
+const ADDABLE = ['starter', 'dessert'];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const view = $('#view');
 let facets = { tags: [], authors: [], books: [] };
@@ -34,13 +37,39 @@ function nextMonday() {
 const blankPlan = () => ({
   name: '',
   planId: null,
-  theme: { chips: [], meals: ['dinner'], days: 7, fewerBooks: false, avoidRecent: true, tryNew: false, start: nextMonday() },
+  theme: { chips: [], meals: ['dinner'], starters: 'off', puddings: 'off', days: 7, fewerBooks: false, avoidRecent: true, tryNew: false, start: nextMonday() },
   slots: [],
   recipes: {},
   warnings: [],
 });
 let plan = store.get() || blankPlan();
 const savePlanLocal = () => store.set(plan);
+
+function normaliseTheme(t) {
+  if (t.meals.includes('dessert')) {
+    t.puddings = t.puddings && t.puddings !== 'off' ? t.puddings : 'weekends';
+    t.meals = t.meals.filter((m) => m !== 'dessert');
+    if (!t.meals.length) t.meals = ['dinner'];
+  }
+  t.starters ||= 'off';
+  t.puddings ||= 'off';
+}
+
+const isWeekend = (start, d) => {
+  const dow = (new Date(`${start || nextMonday()}T12:00:00`).getDay() + d) % 7;
+  return dow === 0 || dow === 6;
+};
+
+function themeSlots(old = []) {
+  const t = plan.theme;
+  const on = { starter: t.starters === 'weekends', dessert: t.puddings === 'weekends' };
+  const slots = [];
+  for (let d = 0; d < t.days; d++) for (const m of MEALS) {
+    if (m in on ? !on[m] || !isWeekend(t.start, d) : !t.meals.includes(m)) continue;
+    slots.push(old.find((s) => s.day === d && s.meal === m && s.locked) || { day: d, meal: m, recipe_id: null, locked: false });
+  }
+  return slots;
+}
 
 async function refreshMeta() {
   [facets, info] = await Promise.all([api('/api/facets'), api('/api/info')]);
@@ -70,6 +99,7 @@ const emojiFor = (s) => (TAG_EMOJI.find(([re]) => re.test(s)) || [null, '🍽️
 
 async function viewPlan() {
   await refreshMeta();
+  normaliseTheme(plan.theme);
   const s = info.stats;
   const el = h(`<div>
     <section class="hero">
@@ -93,6 +123,8 @@ async function viewPlan() {
           <label class="field" style="width:96px"><span>Days</span><select data-days>${[3, 4, 5, 6, 7, 10, 14].map((d) => `<option ${d === plan.theme.days ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
         </div>
         <div class="opts">
+          <label class="toggle"><input type="checkbox" data-weekend="starters" ${plan.theme.starters === 'weekends' ? 'checked' : ''}> 🥗 Starters at weekends</label>
+          <label class="toggle"><input type="checkbox" data-weekend="puddings" ${plan.theme.puddings === 'weekends' ? 'checked' : ''}> 🍮 Puddings at weekends</label>
           <label class="toggle"><input type="checkbox" data-opt="fewerBooks" ${plan.theme.fewerBooks ? 'checked' : ''}> 📚 Fewer books off the shelf</label>
           <label class="toggle"><input type="checkbox" data-opt="avoidRecent" ${plan.theme.avoidRecent !== false ? 'checked' : ''}> 🔁 Skip things cooked recently</label>
           <label class="toggle"><input type="checkbox" data-opt="tryNew" ${plan.theme.tryNew ? 'checked' : ''}> ✨ Favour recipes I've never cooked</label>
@@ -158,11 +190,11 @@ async function viewPlan() {
   const mealsEl = $('[data-meals]', el);
   const drawMeals = () => {
     mealsEl.innerHTML = '';
-    for (const m of MEALS) {
+    for (const m of SIDEBAR_MEALS) {
       const on = plan.theme.meals.includes(m);
-      const b = h(`<button class="chip ${on ? 'tag' : ''}" style="cursor:pointer;${on ? '' : 'background:var(--card);opacity:.7'}" aria-pressed="${on}">${MEAL_EMOJI[m]} ${m}</button>`);
+      const b = h(`<button class="chip ${on ? 'tag' : ''}" style="cursor:pointer;${on ? '' : 'background:var(--card);opacity:.7'}" aria-pressed="${on}">${MEAL_EMOJI[m]} ${MEAL_LABEL[m]}</button>`);
       b.onclick = () => {
-        plan.theme.meals = on ? plan.theme.meals.filter((x) => x !== m) : MEALS.filter((x) => x === m || plan.theme.meals.includes(x));
+        plan.theme.meals = on ? plan.theme.meals.filter((x) => x !== m) : SIDEBAR_MEALS.filter((x) => x === m || plan.theme.meals.includes(x));
         if (!plan.theme.meals.length) plan.theme.meals = ['dinner'];
         drawMeals();
         savePlanLocal();
@@ -173,6 +205,7 @@ async function viewPlan() {
   drawMeals();
   $('[data-start]', el).onchange = (e) => { plan.theme.start = e.target.value; savePlanLocal(); drawBoard(); };
   $('[data-days]', el).onchange = (e) => { plan.theme.days = Number(e.target.value); savePlanLocal(); };
+  $$('[data-weekend]', el).forEach((cb) => (cb.onchange = () => { plan.theme[cb.dataset.weekend] = cb.checked ? 'weekends' : 'off'; savePlanLocal(); }));
   $$('[data-opt]', el).forEach((cb) => (cb.onchange = () => { plan.theme[cb.dataset.opt] = cb.checked; savePlanLocal(); }));
   $('[data-reset]', el).onclick = () => { plan.theme.chips = []; chipper.set(plan.theme.chips); onThemeChange(); };
   $('[data-savetheme]', el).onclick = () => {
@@ -222,15 +255,15 @@ async function viewPlan() {
         <p class="muted">Pick a theme on the left and hit <b>Feed me a week!</b>, or build it yourself by clicking a day.</p>
         <button class="btn" data-blank>✏️ Start with a blank week</button></div>`));
       $('[data-blank]', board).onclick = () => {
-        plan.slots = [];
-        for (let d = 0; d < plan.theme.days; d++) for (const m of plan.theme.meals) plan.slots.push({ day: d, meal: m, recipe_id: null, locked: false });
+        plan.slots = themeSlots();
         savePlanLocal();
         drawBoard();
       };
       return;
     }
     const days = Math.max(...plan.slots.map((s) => s.day)) + 1;
-    const meals = MEALS.filter((m) => plan.slots.some((s) => s.meal === m));
+    const hasMain = plan.slots.some((s) => s.meal === 'dinner');
+    const meals = MEALS.filter((m) => plan.slots.some((s) => s.meal === m) || (hasMain && ADDABLE.includes(m)));
     const grid = h(`<div class="week" style="--days:${days}"></div>`);
     grid.append(h('<div class="corner"></div>'));
     const today = new Date().toISOString().slice(0, 10);
@@ -252,7 +285,7 @@ async function viewPlan() {
       }
     } else {
       for (const m of meals) {
-        grid.append(h(`<div class="mealhead"><span class="e">${MEAL_EMOJI[m]}</span>${m}</div>`));
+        grid.append(h(`<div class="mealhead" data-meal="${m}"><span class="e">${MEAL_EMOJI[m]}</span>${MEAL_LABEL[m]}</div>`));
         for (let d = 0; d < days; d++) appendSlot(grid, d, m, spin);
       }
     }
@@ -261,8 +294,17 @@ async function viewPlan() {
 
   function appendSlot(grid, day, meal, spin) {
     const idx = plan.slots.findIndex((s) => s.day === day && s.meal === meal);
+    if (idx < 0 && ADDABLE.includes(meal)) {
+      const e = h(`<button class="addcourse" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}">＋ ${MEAL_LABEL[meal].toLowerCase()}</button>`);
+      e.onclick = () => {
+        plan.slots.push({ day, meal, recipe_id: null, locked: false });
+        reroll(plan.slots.length - 1);
+      };
+      grid.append(e);
+      return;
+    }
     if (idx < 0) {
-      const e = h(`<div class="slot empty" data-meal="${meal}">＋</div>`);
+      const e = h(`<div class="slot empty" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}">＋</div>`);
       e.onclick = () => {
         plan.slots.push({ day, meal, recipe_id: null, locked: false });
         savePlanLocal();
@@ -274,19 +316,19 @@ async function viewPlan() {
     const s = plan.slots[idx];
     const r = plan.recipes[s.recipe_id];
     if (!r) {
-      const e = h(`<div class="slot empty" data-meal="${meal}" tabindex="0">＋ add ${meal}</div>`);
+      const e = h(`<div class="slot empty ${ADDABLE.includes(meal) ? 'compact' : ''}" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}" tabindex="0">＋ add ${MEAL_LABEL[meal].toLowerCase()}</div>`);
       e.onclick = () => pickFor(idx);
       wireDrop(e, idx);
       grid.append(e);
       return;
     }
-    const el = h(`<div class="slot ${s.locked ? 'locked' : ''} ${s.cooked ? 'cooked' : ''}" draggable="true" data-meal="${meal}" style="--book:${bookColour(r)}">
+    const el = h(`<div class="slot ${ADDABLE.includes(meal) ? 'compact' : ''} ${s.locked ? 'locked' : ''} ${s.cooked ? 'cooked' : ''}" draggable="true" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}" style="--book:${bookColour(r)}">
       <div class="band"></div>
       ${s.locked ? '<span class="lockflag" title="Locked">🔒</span>' : ''}
       <div class="inner">
         <div class="name" title="Recipe details">${esc(r.name)}</div>
         <div class="src">📖 <b>${esc(r.book_title)}</b>${r.page ? ` · p.${esc(r.page)}` : ''}</div>
-        <div class="tags">${r.favourite ? '<span class="pill">❤️</span>' : ''}${tagPills(r, 3)}</div>
+        ${ADDABLE.includes(meal) ? '' : `<div class="tags">${r.favourite ? '<span class="pill">❤️</span>' : ''}${tagPills(r, 3, false)}</div>`}
       </div>
       <div class="acts">
         <button class="icon-btn ${s.locked ? 'on' : ''}" data-a="lock" title="${s.locked ? 'Unlock' : 'Lock (keep when re-spinning)'}">${s.locked ? '🔒' : '🔓'}</button>
@@ -302,7 +344,7 @@ async function viewPlan() {
       if (a === 'lock') { s.locked = !s.locked; savePlanLocal(); drawBoard(); }
       if (a === 'roll') reroll(idx);
       if (a === 'pick') pickFor(idx);
-      if (a === 'clear') { s.recipe_id = null; s.locked = false; savePlanLocal(); drawBoard(); }
+      if (a === 'clear') { ADDABLE.includes(meal) ? plan.slots.splice(idx, 1) : Object.assign(s, { recipe_id: null, locked: false }); savePlanLocal(); drawBoard(); }
       if (a === 'cooked') {
         s.cooked = !s.cooked;
         const upd = await api(`/api/recipes/${r.id}/cooked`, { method: 'POST', body: { cooked: s.cooked } });
@@ -359,12 +401,7 @@ async function viewPlan() {
       const body = { theme: plan.theme, slots: keepLocks && plan.slots.length ? plan.slots : null };
       if (!keepLocks && plan.slots.some((s) => s.locked)) {
         // Keep locked recipes even on a fresh generate, but rebuild the grid for the chosen days/meals.
-        const fresh = [];
-        for (let d = 0; d < plan.theme.days; d++) for (const m of MEALS) if (plan.theme.meals.includes(m)) {
-          const old = plan.slots.find((s) => s.day === d && s.meal === m && s.locked);
-          fresh.push(old ? { ...old } : { day: d, meal: m, recipe_id: null, locked: false });
-        }
-        body.slots = fresh;
+        body.slots = themeSlots(plan.slots).map((s) => ({ ...s }));
       }
       const r = await api('/api/plan/generate', { method: 'POST', body });
       plan.slots = r.slots;
@@ -415,7 +452,7 @@ async function viewPlan() {
 
   function pickFor(idx) {
     const s = plan.slots[idx];
-    recipePicker(`${MEAL_EMOJI[s.meal]} Choose ${s.meal}`, plan.theme.chips, (r) => {
+    recipePicker(`${MEAL_EMOJI[s.meal]} Choose ${MEAL_LABEL[s.meal].toLowerCase()}`, plan.theme.chips, (r) => {
       s.recipe_id = r.id;
       s.cooked = false;
       plan.recipes[r.id] = r;
@@ -447,7 +484,7 @@ async function viewPlan() {
       if (!byBook.has(r.book_id)) byBook.set(r.book_id, { r, items: [] });
       const dt = new Date(startDate());
       dt.setDate(dt.getDate() + s.day);
-      byBook.get(r.book_id).items.push({ r, when: `${DAY_NAMES[dt.getDay()]} ${s.meal}` });
+      byBook.get(r.book_id).items.push({ r, when: `${DAY_NAMES[dt.getDay()]} ${MEAL_LABEL[s.meal].toLowerCase()}` });
     });
     const body = h(`<div class="shelflist"><p class="muted">Pull these ${byBook.size} book${byBook.size === 1 ? '' : 's'} off the shelf. Pages in order, so you can pop in bookmarks.</p></div>`);
     for (const { r, items } of [...byBook.values()].sort((a, b) => b.items.length - a.items.length)) {
@@ -498,6 +535,7 @@ function recipeModal(r, onChange) {
       <div><b class="small">Rating</b><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-star="${n}" class="${n <= r.rating ? 'on' : ''}">⭐</button>`).join('')}</div></div>
       <button type="button" class="heart ${r.favourite ? 'on' : ''}" data-fav title="Favourite">❤️</button>
       <span class="muted small">${r.times_cooked ? `Cooked ${r.times_cooked}× · last ${esc(r.last_cooked || '')}` : 'Never cooked yet'}</span></div>
+    <label class="field"><span>Course</span><select name="course">${['starter', 'main', 'dessert', 'side', 'breakfast', 'other'].map((c) => `<option ${c === r.course ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     <label class="field"><span>Tags <span class="muted small">(comma separated; book tags: ${esc(r.bookTags.join(', ') || 'none')})</span></span><input name="tags" value="${esc(r.recipeTags.join(', '))}"></label>
     <label class="field"><span>Notes</span><textarea name="notes" rows="3" placeholder="e.g. Double the garlic. Kids loved it.">${esc(r.notes || '')}</textarea></label>
     <div class="row"><button class="btn ghost" data-del>🗑️ Delete recipe</button><span class="spacer"></span><button class="btn go" data-save>Save</button></div></div>`);
@@ -512,6 +550,7 @@ function recipeModal(r, onChange) {
     const upd = await api(`/api/recipes/${r.id}`, {
       method: 'PUT',
       body: { name: $('[name=name]', body).value, page: $('[name=page]', body).value, notes: $('[name=notes]', body).value, rating, favourite: fav,
+        ...($('[name=course]', body).value !== r.course && { course: $('[name=course]', body).value }),
         tags: $('[name=tags]', body).value.split(',').map((t) => t.trim()).filter(Boolean) },
     });
     if (plan.recipes[r.id]) { plan.recipes[r.id] = upd; savePlanLocal(); }
@@ -582,7 +621,7 @@ function resultCard(r, refresh) {
 
 function addToPlan(r) {
   if (!plan.slots.length) {
-    for (let d = 0; d < plan.theme.days; d++) for (const m of plan.theme.meals) plan.slots.push({ day: d, meal: m, recipe_id: null, locked: false });
+    plan.slots = themeSlots();
   }
   const days = Math.max(...plan.slots.map((s) => s.day)) + 1;
   const meals = MEALS.filter((m) => plan.slots.some((s) => s.meal === m));
@@ -662,7 +701,8 @@ async function viewLibrary(bookId) {
       <label class="btn" style="position:relative;overflow:hidden">⬆️ Restore / import a backup<input type="file" accept="application/json" style="position:absolute;inset:0;opacity:0"></label>
       <button class="btn" data-demo>🧪 Load demo books</button>
       <button class="btn" data-covers>🖼️ Download missing covers</button>
-      <button class="btn" data-refreshcovers>🌐 Refresh all covers from the internet</button></div>`);
+      <button class="btn" data-refreshcovers>🌐 Refresh all covers from the internet</button>
+      ${info.aiEnabled ? '<button class="btn" data-courses>🍽️ Re-check courses with AI</button>' : ''}</div>`);
     const m = modal('Library tools', body);
     $('input', body).onchange = async (e) => {
       const data = JSON.parse(await e.target.files[0].text());
@@ -683,6 +723,18 @@ async function viewLibrary(bookId) {
       m.close();
       route();
     };
+    $('[data-courses]', body)?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      toast('Checking courses…');
+      try {
+        const r = await api('/api/courses/recheck', { method: 'POST' });
+        toast(`Classified ${r.classified} recipes`);
+      } catch (err) {
+        toast(esc(err.message), { error: true });
+      }
+      m.close();
+      route();
+    });
     $('[data-refreshcovers]', body).onclick = async (e) => {
       if (!(await confirmBox('Refresh every cover from the internet? Your own cover photos will be replaced wherever an online cover is found.', { ok: 'Refresh', danger: true }))) return;
       e.target.disabled = true;

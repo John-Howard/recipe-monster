@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseIndexText } from '../server/indexParser.js';
-import { autoTags } from '../server/tagger.js';
+import { autoTags, guessCourse, mealFits } from '../server/tagger.js';
+import { applyCourseResults } from '../server/ai.js';
+import http from 'node:http';
 import { normaliseIsbn } from '../server/isbn.js';
 import { openDb, Store } from '../server/db.js';
-import { generatePlan, rerollSlot } from '../server/planner.js';
+import { generatePlan, rerollSlot, emptySlots, isWeekend } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
 import { lanUrls, isCrossSite } from '../server/index.js';
 import { downloadCover, findCover, isLocalCover, removeLocalCover } from '../server/covers.js';
@@ -72,7 +74,7 @@ test('planner fills a week without repeats, keeps locks, and rerolls', () => {
   const all = s.allRecipes();
   const theme = { meals: ['breakfast', 'dinner', 'dessert'], days: 7 };
   const g = generatePlan(all, theme);
-  assert.equal(g.slots.length, 21);
+  assert.equal(g.slots.length, 16);
   const ids = g.slots.map((x) => x.recipe_id);
   assert.ok(ids.every(Boolean));
   assert.equal(new Set(ids).size, ids.length);
@@ -251,4 +253,211 @@ test('isCrossSite blocks cross-site browsers and foreign origins only', () => {
   assert.equal(isCrossSite({ origin: 'http://a:3000', host: 'a:3000' }), false);
   assert.equal(isCrossSite({ origin: 'null', host: 'a:3000' }), true);
   assert.equal(isCrossSite({ host: 'a:3000' }), false);
+});
+
+const COURSE_CASES = {
+  'Apricot cream cheese frostings': 'dessert',
+  'Ginger chocolate ganache': 'dessert',
+  Kombucha: 'other',
+  'Blueberry chia pots': 'dessert',
+  'Cream cheese spreads': 'other',
+  'Bird seed crackers': 'other',
+  'Trail mix': 'other',
+  'Aubergine, vegetable and paneer curry': 'main',
+  'Spinach dahl': 'main',
+  'Smoked mackerel pâté': 'starter',
+  'Celeriac and beetroot soup': 'starter',
+  'Mackerel with quinoa tabbouleh': 'main',
+  'Turkey and mushroom bolognese': 'main',
+  'Kale and tofu scramble': 'main',
+  'Roasted Jerusalem artichokes': 'side',
+  'Green beans and edamame with anchovies': 'side',
+  'Quick baked pears with ginger and walnuts': 'dessert',
+  'Mango and lime chia pots': 'dessert',
+  'Chocolate cherry coconut bars': 'dessert',
+  'Horseradish cream cheese spread': 'other',
+  'Slow roasted tomatoes': 'side',
+  'Sweet potato wedges': 'side',
+  'Honey mustard chicken': 'main',
+  'Chicken and leek pie': 'main',
+  'Banana pancakes': 'breakfast',
+  'Green salad': 'side',
+  'Lemon tart': 'dessert',
+  'Sweet potato, kale and cod fishcakes': 'main',
+  'Chocolate fruit kebabs': 'dessert',
+  'Avocado lime tart': 'dessert',
+  'Aubergine parmigiana': 'main',
+  "Low-carb broccoli mac 'n' cheese": 'main',
+  "Low-carb mac 'n' cheese": 'main',
+  'Kefir and berry fool': 'dessert',
+  'Peach and mint granita': 'dessert',
+  'Ginger frozen yoghurt': 'dessert',
+  'Chorizo and parsley muffins': 'other',
+  'Cider vinegar tipple': 'other',
+  'Tropical fruit, mint and cucumber cooler': 'other',
+  'Garlic and parsley butter': 'other',
+  'Vanilla cashew cream': 'other',
+  'Tahini drizzle': 'other',
+  'Vegetable bouillon': 'other',
+  'Butter chicken': 'main',
+  'Lemon drizzle cake': 'dessert',
+};
+
+test('guessCourse classifies by name and tags', () => {
+  for (const [name, course] of Object.entries(COURSE_CASES)) {
+    assert.equal(guessCourse(name, autoTags(name)), course, name);
+  }
+});
+
+test('mealFits uses course when present and falls back to tags otherwise', () => {
+  const r = (course, tags = [], name = 'x') => ({ name, course, tags });
+  assert.ok(mealFits(r('main'), 'dinner'));
+  assert.ok(!mealFits(r('other'), 'dinner'));
+  assert.ok(!mealFits(r('side'), 'dinner'));
+  assert.ok(mealFits(r('dessert'), 'dessert'));
+  assert.ok(!mealFits(r('main'), 'dessert'));
+  assert.ok(mealFits(r('breakfast'), 'breakfast'));
+  assert.ok(mealFits(r('starter'), 'lunch'));
+  assert.ok(mealFits(r('side', ['salad']), 'lunch'));
+  assert.ok(!mealFits(r('dessert'), 'lunch'));
+  assert.ok(mealFits({ name: 'Pie', tags: ['pie'] }, 'dinner'));
+  assert.ok(!mealFits({ name: 'Bread', tags: ['baking'] }, 'dinner'));
+});
+
+test('recipes get a rules course; user and ai courses survive renames', () => {
+  const s = new Store(openDb(':memory:'));
+  const b = s.saveBook({ title: 'T' });
+  s.addRecipes(b, [{ name: 'Spinach dahl' }, { name: 'Kombucha' }]);
+  const [dahl, kombucha] = s.getBook(b).recipes.sort((x, y) => x.name.localeCompare(y.name)).reverse();
+  assert.equal(dahl.course, 'main');
+  assert.equal(dahl.course_source, 'rules');
+  assert.equal(s.updateRecipe(dahl.id, { name: 'Chocolate ganache' }).course, 'dessert');
+  assert.equal(s.updateRecipe(kombucha.id, { course: 'main' }).course_source, 'user');
+  assert.equal(s.updateRecipe(kombucha.id, { name: 'Kombucha 2' }).course, 'main');
+  assert.equal(s.setCourses([{ id: kombucha.id, course: 'other' }, { id: dahl.id, course: 'starter' }], 'ai'), 1);
+  assert.equal(s.getRecipe(dahl.id).course_source, 'ai');
+  assert.equal(s.updateRecipe(dahl.id, { name: 'Spinach dahl soup' }).course, 'starter');
+});
+
+test('existing databases are migrated and backfilled with rules courses', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rm-')), 'old.db');
+  const old = openDb(file);
+  old.exec('ALTER TABLE recipes DROP COLUMN course; ALTER TABLE recipes DROP COLUMN course_source;');
+  old.exec("INSERT INTO books (title) VALUES ('B'); INSERT INTO recipes (book_id, name) VALUES (1, 'Kombucha');");
+  old.close();
+  const s = new Store(openDb(file));
+  const r = s.allRecipes()[0];
+  assert.equal(r.course, 'other');
+  assert.equal(r.course_source, 'rules');
+});
+
+test('backup keeps courses and still imports old backups without them', () => {
+  const s = new Store(openDb(':memory:'));
+  const b = s.saveBook({ title: 'T' });
+  s.addRecipes(b, [{ name: 'Kombucha' }]);
+  s.updateRecipe(s.allRecipes()[0].id, { course: 'main' });
+  const dump = s.exportAll();
+  const s2 = new Store(openDb(':memory:'));
+  s2.importAll(dump);
+  assert.deepEqual([s2.allRecipes()[0].course, s2.allRecipes()[0].course_source], ['main', 'user']);
+  for (const r of dump.books[0].recipes) { delete r.course; delete r.course_source; }
+  const s3 = new Store(openDb(':memory:'));
+  s3.importAll(dump);
+  assert.equal(s3.allRecipes()[0].course, 'other');
+});
+
+test('applyCourseResults keeps only known ids and valid courses', () => {
+  const batch = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }];
+  assert.deepEqual(
+    applyCourseResults(batch, [{ id: 1, course: 'main' }, { id: 2, course: 'bogus' }, { id: 3, course: 'side' }, { id: 1, course: 'side' }]),
+    [{ id: 1, course: 'main' }]
+  );
+});
+
+test('course routes need AI and classify non-user recipes', async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const b = s.saveBook({ title: 'T' });
+  s.addRecipes(b, [{ name: 'Kombucha' }, { name: 'Mine' }]);
+  const mine = s.allRecipes().find((r) => r.name === 'Mine');
+  s.updateRecipe(mine.id, { course: 'side' });
+  const seen = [];
+  const classify = async (recipes) => (seen.push(...recipes.map((r) => r.name)), recipes.map((r) => ({ id: r.id, course: 'starter' })));
+  const server = http.createServer(createApp(s, { classify }));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const post = (p) => fetch(url + p, { method: 'POST' }).then(async (r) => [r.status, await r.json()]);
+  const saved = process.env.ANTHROPIC_API_KEY;
+  try {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    assert.equal((await post(`/api/books/${b}/courses`))[0], 400);
+    process.env.ANTHROPIC_API_KEY = 'x';
+    assert.deepEqual(await post(`/api/books/${b}/courses`), [200, { classified: 1 }]);
+    assert.deepEqual(seen, ['Kombucha']);
+    assert.deepEqual(await post('/api/courses/recheck'), [200, { classified: 1 }]);
+    assert.equal(s.getRecipe(mine.id).course, 'side');
+  } finally {
+    if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = saved;
+    server.close();
+  }
+});
+
+const rec = (id, name, course, tags = []) => ({ id, name, course, tags, book_id: id, favourite: 0, rating: 0, times_cooked: 0, last_cooked: null });
+
+test('isWeekend counts Saturday and Sunday from the start date, defaulting to a Monday start', () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((d) => isWeekend('2026-11-09', d)), [false, false, false, false, false, true, true]);
+  assert.deepEqual([0, 1, 2].map((d) => isWeekend('2026-11-14', d)), [true, true, false]);
+  assert.deepEqual([0, 5, 6, 7].map((d) => isWeekend(undefined, d)), [false, true, true, false]);
+});
+
+test('starters and puddings appear only on weekend days when enabled', () => {
+  const theme = { meals: ['dinner'], days: 7, start: '2026-11-09' };
+  const meals = (t) => emptySlots(7, t.meals, t).filter((x) => x.meal !== 'dinner').map((x) => `${x.day}${x.meal}`);
+  assert.deepEqual(meals(theme), []);
+  assert.deepEqual(meals({ ...theme, starters: 'weekends', puddings: 'weekends' }), ['5starter', '5dessert', '6starter', '6dessert']);
+  const recipes = [rec(1, 'Chicken pie', 'main', ['chicken']), rec(2, 'Leek soup', 'starter', ['soup']), rec(3, 'Berry fool', 'dessert')];
+  const g = generatePlan(recipes, { ...theme, starters: 'weekends' });
+  assert.deepEqual(g.slots.filter((x) => x.meal === 'starter').map((x) => x.day), [5, 6]);
+  assert.equal(g.slots.filter((x) => x.meal === 'dessert').length, 0);
+});
+
+test('a legacy dessert meal in a theme turns on weekend puddings', () => {
+  const recipes = [rec(1, 'Chicken pie', 'main'), rec(3, 'Berry fool', 'dessert'), rec(4, 'Lemon tart', 'dessert')];
+  const g = generatePlan(recipes, { meals: ['dinner', 'dessert'], days: 7, start: '2026-11-09' });
+  assert.deepEqual(g.slots.filter((x) => x.meal === 'dessert').map((x) => x.day), [5, 6]);
+  assert.equal(g.slots.filter((x) => x.meal === 'dinner').length, 7);
+});
+
+test('starters avoid the main ingredient of the same evening', () => {
+  const main = rec(1, 'Roast chicken', 'main', ['chicken']);
+  const chickenSoup = rec(2, 'Chicken broth', 'starter', ['chicken']);
+  const veg = rec(3, 'Beetroot dip', 'starter', ['dip']);
+  for (const pool of [[chickenSoup, veg], [veg, chickenSoup]]) {
+    const g = generatePlan([main, ...pool], { meals: ['dinner'], days: 1, start: '2026-11-14', starters: 'weekends' }, null, () => 0.5);
+    assert.equal(g.slots.find((x) => x.meal === 'starter').recipe_id, 3);
+  }
+});
+
+test('puddings after a heavy main lean light, and reroll keeps that', () => {
+  const main = rec(1, 'Chicken and leek pie', 'main', ['pie', 'chicken']);
+  const heavy = rec(2, 'Treacle tart', 'dessert');
+  const light = rec(3, 'Berry fool', 'dessert');
+  for (const pool of [[heavy, light], [light, heavy]]) {
+    const theme = { meals: ['dinner'], days: 1, start: '2026-11-14', puddings: 'weekends' };
+    const g = generatePlan([main, ...pool], theme, null, () => 0.5);
+    assert.equal(g.slots.find((x) => x.meal === 'dessert').recipe_id, 3);
+    const idx = g.slots.findIndex((x) => x.meal === 'dessert');
+    g.slots[idx].recipe_id = null;
+    assert.equal(rerollSlot([main, ...pool], theme, g.slots, idx, () => 0.5).slot.recipe_id, 3);
+  }
+});
+
+test('mealFits handles starters', () => {
+  assert.ok(mealFits({ name: 'x', course: 'starter', tags: [] }, 'starter'));
+  assert.ok(!mealFits({ name: 'x', course: 'main', tags: [] }, 'starter'));
+  assert.ok(mealFits({ name: 'Leek soup', tags: ['soup'] }, 'starter'));
+  assert.ok(mealFits({ name: 'Smoked mackerel pate', tags: [] }, 'starter'));
+  assert.ok(!mealFits({ name: 'Chicken pie', tags: ['pie'] }, 'starter'));
 });
