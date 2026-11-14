@@ -7,7 +7,7 @@ import { openDb, Store } from '../server/db.js';
 import { generatePlan, rerollSlot } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
 import { lanUrls } from '../server/index.js';
-import { downloadCover, findCover, isLocalCover } from '../server/covers.js';
+import { downloadCover, findCover, isLocalCover, removeLocalCover } from '../server/covers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -207,4 +207,27 @@ test('downloadCover caps size by Content-Length and while streaming', async () =
   assert.equal(spy.cancelled, true);
   assert.ok(spy.pulled < 10);
   assert.equal(fs.readdirSync(dir).length, 0);
+});
+
+test('findCover ignores a local cover_url and removeLocalCover is safe', async () => {
+  const dir = tmpDir();
+  const calls = [];
+  const fetch = async (u) => (calls.push(u), imgRes(u));
+  const url = await findCover({ cover_url: '/covers/old.jpg', isbn: '9780141439518', title: 'T' }, dir, { fetch });
+  assert.ok(isLocalCover(url));
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes('/b/isbn/'));
+
+  const keep = path.join(dir, 'keep.jpg');
+  fs.writeFileSync(keep, 'x');
+  const outside = path.join(path.dirname(dir), 'outside-cover.jpg');
+  fs.writeFileSync(outside, 'x');
+  removeLocalCover('https://example.com/keep.jpg', dir);
+  removeLocalCover(`/covers/../${path.basename(outside)}`, dir);
+  removeLocalCover('/covers/sub/../keep.jpg', dir);
+  removeLocalCover('/covers/missing.jpg', dir);
+  assert.ok(fs.existsSync(keep) && fs.existsSync(outside));
+  removeLocalCover('/covers/keep.jpg', dir);
+  assert.ok(!fs.existsSync(keep));
+  fs.rmSync(outside);
 });

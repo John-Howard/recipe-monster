@@ -12,6 +12,15 @@ const HEADERS = { 'User-Agent': 'RecipeMonster/1.0 (home cookbook catalogue)' };
 
 export const isLocalCover = (url) => String(url || '').startsWith('/covers/');
 
+export function removeLocalCover(url, dir) {
+  if (!isLocalCover(url)) return;
+  const name = url.slice('/covers/'.length);
+  if (!name || name !== path.basename(name) || name === '..') return;
+  try {
+    fs.unlinkSync(path.join(dir, name));
+  } catch {}
+}
+
 export function isAllowedHost(host) {
   return HOSTS.includes(host) || host === 'archive.org' || HOST_SUFFIXES.some((s) => host.endsWith(s));
 }

@@ -21,7 +21,7 @@ The terminal prints the address to open on your phone (for example `http://192.1
 
 Your data lives in `data/recipe-monster.db` (plus `data/covers/` for cover photos). Set `RECIPE_MONSTER_DATA=/some/folder` to keep it elsewhere, and `PORT=8080` to change the port. **Library → ⋯** has backup/restore (JSON), demo-data controls and **Download missing covers**.
 
-Covers are downloaded into `data/covers/` whenever one can be found: from the ISBN lookup's cover, then Open Library by ISBN, then Open Library by title and author. This happens when a book is saved; use **🔎 Find cover** in a book's edit dialog or **Download missing covers** in Library → ⋯ to fill in the rest. If nothing is found, a remote cover URL is kept as before.
+Covers are downloaded into `data/covers/` whenever one can be found: from the ISBN lookup's cover, then Open Library by ISBN, then Open Library by title and author. This happens when a book is saved; use **🔎 Find cover** in a book's edit dialog or **Download missing covers** in Library → ⋯ to fill in the rest. If nothing is found, a remote cover URL is kept as before. To swap your own cover photos for online ones, use **🌐 Replace with online cover** on a book, or **Refresh all covers from the internet** in Library → ⋯; the old photo is deleted only when a replacement is found.
 
 > There's no login: anyone on your home network can open the app. Don't expose the port to the internet.
 

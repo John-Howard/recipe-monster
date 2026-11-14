@@ -10,7 +10,7 @@ import { openDb, Store } from './db.js';
 import { parseIndexText } from './indexParser.js';
 import { generatePlan, rerollSlot } from './planner.js';
 import { lookupIsbn } from './isbn.js';
-import { findCover, isLocalCover } from './covers.js';
+import { findCover, isLocalCover, removeLocalCover } from './covers.js';
 import { aiEnabled, extractIndex, extractBook } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,13 +56,16 @@ export function createApp(store) {
   app.get('/api/info', wrap(() => ({ lanUrls: lanUrls(), aiEnabled: aiEnabled(), stats: store.stats() })));
 
   // ---- books ----
-  const localiseCover = async (bookId) => {
+  const localiseCover = async (bookId, { refresh = false } = {}) => {
     const book = store.getBook(bookId);
-    if (!book || isLocalCover(book.cover_url)) return book;
+    if (!book || (!refresh && isLocalCover(book.cover_url))) return book;
     const url = await findCover(book, COVERS_DIR);
-    if (url) store.setBookCover(bookId, url);
+    if (!url) return book;
+    store.setBookCover(bookId, url);
+    if (refresh) removeLocalCover(book.cover_url, COVERS_DIR);
     return store.getBook(bookId);
   };
+  const wantsRefresh = (req) => req.query.refresh === '1';
   app.get('/api/books', wrap(() => store.listBooks()));
   const localiseInBackground = (bookId) =>
     localiseCover(bookId)
@@ -87,20 +90,23 @@ export function createApp(store) {
   app.post('/api/books/:id/cover', wrap(async (req) => {
     const before = store.getBook(id(req));
     if (!before) throw Object.assign(new Error('Not found'), { status: 404 });
-    const book = await localiseCover(before.id);
+    const refresh = wantsRefresh(req);
+    const book = await localiseCover(before.id, { refresh });
+    if (refresh && book.cover_url === before.cover_url) throw new Error('No cover found online');
     if (!isLocalCover(book.cover_url)) throw new Error('No cover found');
-    if (!isLocalCover(before.cover_url)) broadcast({ type: 'library-changed' });
+    if (book.cover_url !== before.cover_url) broadcast({ type: 'library-changed' });
     return book;
   }));
-  app.post('/api/covers/fetch-missing', wrap(async () => {
-    const missing = store.listBooks().filter((b) => !isLocalCover(b.cover_url));
+  app.post('/api/covers/fetch-missing', wrap(async (req) => {
+    const refresh = wantsRefresh(req);
+    const books = store.listBooks().filter((b) => refresh || !isLocalCover(b.cover_url));
     let found = 0;
-    for (const b of missing) {
-      const book = await localiseCover(b.id);
-      if (isLocalCover(book.cover_url)) found++;
+    for (const b of books) {
+      const book = await localiseCover(b.id, { refresh });
+      if (book.cover_url !== b.cover_url) found++;
     }
     if (found) broadcast({ type: 'library-changed' });
-    return { checked: missing.length, found };
+    return { checked: books.length, found };
   }));
   app.delete('/api/books/:id', wrap((req) => {
     store.deleteBook(id(req));
