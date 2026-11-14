@@ -10,6 +10,7 @@ import { openDb, Store } from './db.js';
 import { parseIndexText } from './indexParser.js';
 import { generatePlan, rerollSlot } from './planner.js';
 import { lookupIsbn } from './isbn.js';
+import { findCover, isLocalCover, removeLocalCover } from './covers.js';
 import { aiEnabled, extractIndex, extractBook } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,8 +19,23 @@ const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
 const COVERS_DIR = path.join(DATA_DIR, 'covers');
 fs.mkdirSync(COVERS_DIR, { recursive: true });
 
+export function isCrossSite(headers) {
+  const site = headers['sec-fetch-site'];
+  if (site) return !['same-origin', 'none'].includes(site);
+  if (!headers.origin) return false;
+  try {
+    return new URL(headers.origin).host !== headers.host;
+  } catch {
+    return true;
+  }
+}
+
 export function createApp(store) {
   const app = express();
+  app.use('/api', (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || !isCrossSite(req.headers)) return next();
+    res.status(403).json({ error: 'Cross-site request blocked' });
+  });
   app.use(express.json({ limit: '25mb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/covers', express.static(COVERS_DIR, { maxAge: '30d' }));
@@ -55,12 +71,27 @@ export function createApp(store) {
   app.get('/api/info', wrap(() => ({ lanUrls: lanUrls(), aiEnabled: aiEnabled(), stats: store.stats() })));
 
   // ---- books ----
+  const localiseCover = async (bookId, { refresh = false } = {}) => {
+    const book = store.getBook(bookId);
+    if (!book || (!refresh && isLocalCover(book.cover_url))) return book;
+    const url = await findCover(book, COVERS_DIR);
+    if (!url) return book;
+    store.setBookCover(bookId, url);
+    if (refresh && !store.countBooksWithCover(book.cover_url)) removeLocalCover(book.cover_url, COVERS_DIR);
+    return store.getBook(bookId);
+  };
+  const wantsRefresh = (req) => req.query.refresh === '1';
   app.get('/api/books', wrap(() => store.listBooks()));
+  const localiseInBackground = (bookId) =>
+    localiseCover(bookId)
+      .then((book) => isLocalCover(book?.cover_url) && broadcast({ type: 'library-changed' }))
+      .catch((e) => console.error('cover download failed:', e.message));
   app.post('/api/books', wrap((req) => {
     const dup = store.recentDuplicateBook(req.body);
     if (dup) return store.getBook(dup);
     const bookId = store.saveBook(req.body);
     const book = store.getBook(bookId);
+    localiseInBackground(bookId);
     broadcast({ type: 'book-added', book: { id: book.id, title: book.title } });
     return book;
   }));
@@ -68,7 +99,29 @@ export function createApp(store) {
   app.put('/api/books/:id', wrap((req) => {
     store.saveBook(req.body, id(req));
     broadcast({ type: 'library-changed' });
+    localiseInBackground(id(req));
     return store.getBook(id(req));
+  }));
+  app.post('/api/books/:id/cover', wrap(async (req) => {
+    const before = store.getBook(id(req));
+    if (!before) throw Object.assign(new Error('Not found'), { status: 404 });
+    const refresh = wantsRefresh(req);
+    const book = await localiseCover(before.id, { refresh });
+    if (refresh && book.cover_url === before.cover_url) throw new Error('No cover found online');
+    if (!isLocalCover(book.cover_url)) throw new Error('No cover found');
+    if (book.cover_url !== before.cover_url) broadcast({ type: 'library-changed' });
+    return book;
+  }));
+  app.post('/api/covers/fetch-missing', wrap(async (req) => {
+    const refresh = wantsRefresh(req);
+    const books = store.listBooks().filter((b) => refresh || !isLocalCover(b.cover_url));
+    let found = 0;
+    for (const b of books) {
+      const book = await localiseCover(b.id, { refresh });
+      if (book.cover_url !== b.cover_url) found++;
+    }
+    if (found) broadcast({ type: 'library-changed' });
+    return { checked: books.length, found };
   }));
   app.delete('/api/books/:id', wrap((req) => {
     store.deleteBook(id(req));

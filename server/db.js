@@ -123,6 +123,14 @@ export class Store {
     return b;
   }
 
+  countBooksWithCover(url) {
+    return this.db.prepare('SELECT COUNT(*) AS n FROM books WHERE cover_url = ?').get(url).n;
+  }
+
+  setBookCover(id, url) {
+    this.db.prepare('UPDATE books SET cover_url = ? WHERE id = ?').run(url, id);
+  }
+
   saveBook(data, id = null) {
     const fields = ['title', 'subtitle', 'authors', 'isbn', 'publisher', 'year', 'cover_url', 'colour', 'notes'];
     const vals = fields.map((f) => String(data[f] ?? '').trim());

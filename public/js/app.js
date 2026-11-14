@@ -660,13 +660,40 @@ async function viewLibrary(bookId) {
     const body = h(`<div class="stack">
       <a class="btn" href="/api/export" download>⬇️ Download a backup (JSON)</a>
       <label class="btn" style="position:relative;overflow:hidden">⬆️ Restore / import a backup<input type="file" accept="application/json" style="position:absolute;inset:0;opacity:0"></label>
-      <button class="btn" data-demo>🧪 Load demo books</button></div>`);
+      <button class="btn" data-demo>🧪 Load demo books</button>
+      <button class="btn" data-covers>🖼️ Download missing covers</button>
+      <button class="btn" data-refreshcovers>🌐 Refresh all covers from the internet</button></div>`);
     const m = modal('Library tools', body);
     $('input', body).onchange = async (e) => {
       const data = JSON.parse(await e.target.files[0].text());
       const r = await api('/api/import', { method: 'POST', body: data });
       m.close();
       toast(`Imported ${r.books} books and ${r.recipes} recipes`);
+      route();
+    };
+    $('[data-covers]', body).onclick = async (e) => {
+      e.target.disabled = true;
+      toast('Looking for covers…');
+      try {
+        const r = await api('/api/covers/fetch-missing', { method: 'POST' });
+        toast(`Found ${r.found} of ${r.checked} covers`);
+      } catch (err) {
+        toast(esc(err.message), { error: true });
+      }
+      m.close();
+      route();
+    };
+    $('[data-refreshcovers]', body).onclick = async (e) => {
+      if (!(await confirmBox('Refresh every cover from the internet? Your own cover photos will be replaced wherever an online cover is found.', { ok: 'Refresh', danger: true }))) return;
+      e.target.disabled = true;
+      toast('Refreshing covers…');
+      try {
+        const r = await api('/api/covers/fetch-missing?refresh=1', { method: 'POST' });
+        toast(`Replaced ${r.found} of ${r.checked} covers`);
+      } catch (err) {
+        toast(esc(err.message), { error: true });
+      }
+      m.close();
       route();
     };
     $('[data-demo]', body).onclick = async () => {
@@ -696,7 +723,7 @@ async function bookModal(id) {
             <label class="field" style="flex:1"><span>Year</span><input name="year" value="${esc(b.year)}"></label>
             <label class="field" style="width:70px"><span>Colour</span><input name="colour" type="color" value="${bookColour(b)}" style="padding:0;height:42px"></label></div>
           <label class="field"><span>Diet / theme tags <span class="muted small">(comma separated, e.g. Slimming World, Fast 800)</span></span><input name="tags" value="${esc(b.tags.join(', '))}"></label>
-          <label class="field"><span>Cover image URL</span><input name="cover_url" value="${esc(b.cover_url)}"></label>
+          <label class="field"><span>Cover image URL</span><span class="row"><input name="cover_url" value="${esc(b.cover_url)}" style="flex:1"><button type="button" class="btn sm" data-findcover>🔎 Find cover</button>${b.cover_url.startsWith('/covers/') ? '<button type="button" class="btn sm" data-replacecover>🌐 Replace with online cover</button>' : ''}</span></label>
         </div></div>
       <div class="row"><button type="button" class="btn ghost" data-delbook>🗑️ Delete book</button><span class="spacer"></span>
         <a class="btn sun" href="#/scan/${b.id}">📸 Scan more index pages</a><button class="btn go">Save details</button></div>
@@ -737,6 +764,31 @@ async function bookModal(id) {
     m.close();
     route();
   };
+  $('[data-findcover]', body).onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      const upd = await api(`/api/books/${b.id}/cover`, { method: 'POST' });
+      $('[name=cover_url]', body).value = upd.cover_url;
+      $('.cover', body).innerHTML = `<img src="${esc(upd.cover_url)}" alt="">`;
+      toast('Cover downloaded');
+    } catch (err) {
+      toast(esc(err.message), { error: true });
+    }
+    e.target.disabled = false;
+  };
+  $('[data-replacecover]', body)?.addEventListener('click', async (e) => {
+    if (!(await confirmBox('Replace this cover with one from the internet? Your current photo will be deleted.', { ok: 'Replace', danger: true }))) return;
+    e.target.disabled = true;
+    try {
+      const upd = await api(`/api/books/${b.id}/cover?refresh=1`, { method: 'POST' });
+      $('[name=cover_url]', body).value = upd.cover_url;
+      $('.cover', body).innerHTML = `<img src="${esc(upd.cover_url)}" alt="">`;
+      toast('Cover replaced');
+    } catch {
+      toast('Nothing found online, so your current cover was kept', { error: true });
+    }
+    e.target.disabled = false;
+  });
   $('[data-delbook]', body).onclick = async () => {
     if (!(await confirmBox(`Delete <b>${esc(b.title)}</b> and its ${b.recipes.length} recipes?`, { ok: 'Delete', danger: true }))) return;
     await api(`/api/books/${b.id}`, { method: 'DELETE' });
