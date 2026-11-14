@@ -93,7 +93,7 @@ img { max-width: 100%; }
   .nav a { padding: .35rem .55rem; font-size: .9rem; }
 }
 
-main { max-width: 1400px; margin: 0 auto; padding: clamp(1rem, 3vw, 2rem); }
+main { max-width: 1760px; margin: 0 auto; padding: clamp(1rem, 3vw, 2rem); }
 .view { animation: fadeUp .35s ease both; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
@@ -192,8 +192,8 @@ label.field > span { display: block; margin-bottom: .25rem; }
 @keyframes wiggle { 0%, 100% { transform: rotate(0) } 25% { transform: rotate(-6deg) } 75% { transform: rotate(6deg) } }
 
 /* ---------- planner ---------- */
-.planner-grid { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 1.4rem; align-items: start; }
-@media (max-width: 1100px) { .planner-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+.planner-grid { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 1.4rem; align-items: start; }
+@media (max-width: 1400px) { .planner-grid { grid-template-columns: minmax(0, 1fr) !important; } }
 .planner-grid > * { min-width: 0; }
 .theme-card h2 { display: flex; align-items: center; gap: .5rem; }
 .quick-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: .55rem; margin: .6rem 0 1rem; }
@@ -231,7 +231,7 @@ label.field > span { display: block; margin-bottom: .25rem; }
 .board-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .board-head h2 { margin: 0; }
 .board-head .plan-name { font-family: var(--font-head); font-size: 1.5rem; border: none; border-bottom: 2px dashed var(--soft-line); border-radius: 0; background: transparent; padding: .1rem .2rem; width: auto; min-width: 0; flex: 1 1 200px; box-shadow: none; }
-.week { display: grid; grid-template-columns: 90px repeat(var(--days, 7), minmax(128px, 1fr)); gap: .6rem; overflow-x: auto; padding: .3rem .3rem 1rem; }
+.week { display: grid; grid-template-columns: minmax(64px, 76px) repeat(var(--days, 7), minmax(104px, 1fr)); gap: .6rem; overflow-x: auto; padding: .3rem .3rem 1rem; }
 .week .dayhead { text-align: center; font-family: var(--font-head); font-size: 1.05rem; padding: .3rem; border-radius: var(--radius-sm); background: var(--card); border: 2px solid var(--line); }
 .week .dayhead small { display: block; font-family: var(--font-body); font-size: .75rem; color: var(--ink-2); font-weight: 700; }
 .week .dayhead.today { background: var(--mustard); color: #2b2118; }
@@ -247,8 +247,8 @@ label.field > span { display: block; margin-bottom: .25rem; }
 .slot .src { font-size: .78rem; color: var(--ink-2); font-weight: 700; }
 .slot .src b { color: var(--ink); }
 .slot .tags { display: flex; flex-wrap: wrap; gap: .2rem; }
-.slot .acts { display: flex; gap: .15rem; justify-content: space-between; padding: .3rem .35rem; border-top: 2px dashed var(--soft-line); }
-.slot .acts .icon-btn { width: 28px; height: 28px; font-size: .85rem; border-width: 1.5px; }
+.slot .acts { display: flex; gap: .15rem; justify-content: center; flex-wrap: wrap; padding: .3rem .35rem; border-top: 2px dashed var(--soft-line); }
+.slot .acts .icon-btn { width: 26px; height: 26px; font-size: .85rem; border-width: 1.5px; }
 .slot.locked { background: var(--mustard-2); }
 .slot.cooked .name { text-decoration: line-through; text-decoration-color: var(--mint); text-decoration-thickness: 3px; }
 .slot.empty { border-style: dashed; box-shadow: none; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; font-weight: 800; background: transparent; }
