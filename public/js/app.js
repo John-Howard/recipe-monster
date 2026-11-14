@@ -42,8 +42,44 @@ const blankPlan = () => ({
   recipes: {},
   warnings: [],
 });
+const CLIENT_ID = Math.random().toString(36).slice(2);
 let plan = store.get() || blankPlan();
-const savePlanLocal = () => store.set(plan);
+let planVersion = 0;
+let pushTimer = null;
+
+async function pushPlan() {
+  pushTimer = null;
+  try {
+    planVersion = (await api('/api/current-plan', { method: 'PUT', body: { plan, client: CLIENT_ID } })).version;
+  } catch {}
+}
+function savePlanLocal() {
+  store.set(plan);
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushPlan, 400);
+}
+async function loadSharedPlan() {
+  try {
+    const remote = await api('/api/current-plan', { retries: 0 });
+    planVersion = remote.version;
+    if (remote.plan) {
+      plan = remote.plan;
+      store.set(plan);
+    } else if (store.get()) await pushPlan();
+  } catch {}
+}
+async function applyRemotePlan(version) {
+  if (pushTimer || version <= planVersion) return;
+  try {
+    const remote = await api('/api/current-plan', { retries: 0 });
+    if (pushTimer || !remote.plan || remote.version <= planVersion) return;
+    plan = remote.plan;
+    planVersion = remote.version;
+    store.set(plan);
+    const name = location.hash.replace(/^#\/?/, '').split('/')[0] || 'plan';
+    if (name === 'plan' && !document.querySelector('.modal-back')) route();
+  } catch {}
+}
 
 function normaliseTheme(t) {
   if (t.meals.includes('dessert')) {
@@ -947,6 +983,7 @@ function listen() {
     } else if (ev.type === 'book-added') {
       toast(`📚 New book on the shelf: <b>${esc(ev.book.title)}</b>`);
     }
+    if (ev.type === 'current-plan' && ev.client !== CLIENT_ID) applyRemotePlan(ev.version);
     if (['recipes-added', 'library-changed', 'book-added'].includes(ev.type)) {
       refreshMeta().catch(() => {});
       const name = location.hash.replace(/^#\/?/, '').split('/')[0];
@@ -959,4 +996,4 @@ initThemeToggle($('.theme-toggle'));
 $('.brand').innerHTML = `${monsterSvg()}<b>Recipe <span>Monster</span></b>`;
 window.addEventListener('hashchange', route);
 listen();
-route();
+loadSharedPlan().then(route);

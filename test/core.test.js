@@ -461,3 +461,42 @@ test('mealFits handles starters', () => {
   assert.ok(mealFits({ name: 'Smoked mackerel pate', tags: [] }, 'starter'));
   assert.ok(!mealFits({ name: 'Chicken pie', tags: ['pie'] }, 'starter'));
 });
+
+test('current plan versions increment and survive backup', () => {
+  const s = new Store(openDb(':memory:'));
+  assert.deepEqual(s.getCurrentPlan(), { plan: null, version: 0 });
+  assert.equal(s.saveCurrentPlan({ name: 'A' }), 1);
+  assert.equal(s.saveCurrentPlan({ name: 'B' }), 2);
+  assert.deepEqual(s.getCurrentPlan(), { plan: { name: 'B' }, version: 2 });
+  const s2 = new Store(openDb(':memory:'));
+  s2.importAll(s.exportAll());
+  assert.equal(s2.getCurrentPlan().plan.name, 'B');
+  s2.importAll({ books: [] });
+  assert.equal(s2.getCurrentPlan().plan.name, 'B');
+});
+
+test('current plan route saves, validates and broadcasts', async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const server = http.createServer(createApp(s));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const put = (body) => fetch(`${url}/api/current-plan`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const ac = new AbortController();
+  try {
+    const events = await fetch(`${url}/api/events`, { signal: ac.signal });
+    const reader = events.body.getReader();
+    await reader.read();
+    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: null, version: 0 });
+    assert.equal((await put({ plan: 'x', client: 'a' })).status, 400);
+    assert.equal((await put({ plan: [], client: 'a' })).status, 400);
+    assert.deepEqual(await (await put({ plan: { name: 'Week' }, client: 'a' })).json(), { version: 1 });
+    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: { name: 'Week' }, version: 1 });
+    const { value } = await reader.read();
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(value).replace(/^data: /, '')), { type: 'current-plan', version: 1, client: 'a' });
+  } finally {
+    ac.abort();
+    server.closeAllConnections();
+    server.close();
+  }
+});

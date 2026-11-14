@@ -216,6 +216,14 @@ export function createApp(store, { classify = classifyCourses } = {}) {
   app.post('/api/plans', wrap((req) => store.getPlan(store.savePlan(req.body))));
   app.put('/api/plans/:id', wrap((req) => store.getPlan(store.savePlan(req.body, id(req)))));
   app.delete('/api/plans/:id', wrap((req) => store.deletePlan(id(req))));
+  app.get('/api/current-plan', wrap(() => store.getCurrentPlan()));
+  app.put('/api/current-plan', wrap((req) => {
+    const { plan, client } = req.body;
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw Object.assign(new Error('Plan must be an object'), { status: 400 });
+    const version = store.saveCurrentPlan(plan);
+    broadcast({ type: 'current-plan', version, client });
+    return { version };
+  }));
   app.get('/api/themes', wrap(() => store.listThemes()));
   app.post('/api/themes', wrap((req) => ({ id: store.saveTheme(req.body) })));
   app.delete('/api/themes/:id', wrap((req) => store.deleteTheme(id(req))));

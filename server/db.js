@@ -61,6 +61,11 @@ export function openDb(file = path.join(DATA_DIR, 'recipe-monster.db')) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS themes (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -450,6 +455,20 @@ export class Store {
     this.db.prepare('DELETE FROM themes WHERE id = ?').run(id);
   }
 
+  // ---------- current plan (shared between devices) ----------
+  getCurrentPlan() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'current_plan'").get();
+    const ver = this.db.prepare("SELECT value FROM settings WHERE key = 'current_plan_version'").get();
+    return { plan: row ? JSON.parse(row.value) : null, version: ver ? Number(ver.value) : 0 };
+  }
+  saveCurrentPlan(plan) {
+    const version = this.getCurrentPlan().version + 1;
+    const put = this.db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at");
+    put.run('current_plan', JSON.stringify(plan));
+    put.run('current_plan_version', String(version));
+    return version;
+  }
+
   // ---------- backup ----------
   exportAll() {
     const books = this.listBooks().map((b) => {
@@ -462,7 +481,7 @@ export class Store {
         })),
       };
     });
-    return { app: 'recipe-monster', version: 1, exported_at: new Date().toISOString(), books, plans: this.listPlans(), themes: this.listThemes() };
+    return { app: 'recipe-monster', version: 1, exported_at: new Date().toISOString(), books, plans: this.listPlans(), themes: this.listThemes(), current_plan: this.getCurrentPlan().plan };
   }
 
   importAll(data) {
@@ -484,6 +503,7 @@ export class Store {
       }
     }
     for (const t of data.themes || []) this.saveTheme(t);
+    if (data.current_plan) this.saveCurrentPlan(data.current_plan);
     return { books, recipes };
   }
 }
