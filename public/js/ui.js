@@ -64,7 +64,7 @@ export async function runJob(path, body, { onTick, timeoutMs = 5 * 60_000 } = {}
     }
     if (j.status === 'done') return j.result;
     if (j.status === 'error') throw new Error(j.error);
-    onTick?.(Math.round((Date.now() - j.started) / 1000));
+    onTick?.(Math.round((Date.now() - j.started) / 1000), j.progress);
   }
   throw new Error('Reading took too long. Try again, or use a smaller/closer photo.');
 }

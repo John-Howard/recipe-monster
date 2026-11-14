@@ -1,5 +1,5 @@
 import {
-  api, $, $$, h, esc, debounce, toast, modal, confirmBox, confetti, chomp, monsterSvg, quip,
+  api, runJob, $, $$, h, esc, debounce, toast, modal, confirmBox, confetti, chomp, monsterSvg, quip,
   chipInput, chipLabel, chipClass, bookColour, tagPills, MEAL_EMOJI, initThemeToggle, loadScript,
 } from './ui.js';
 import { mountScanner } from './scanner.js';
@@ -809,11 +809,19 @@ async function viewLibrary(bookId) {
       route();
     };
     $('[data-courses]', body)?.addEventListener('click', async (e) => {
+      const count = books.reduce((n, b) => n + b.recipe_count, 0);
+      if (!(await confirmBox(`Ask Claude to re-check the course of ${count} recipes? Courses you set yourself are kept.`, { ok: 'Re-check' }))) return;
       e.target.disabled = true;
-      toast('Checking courses…');
+      const view = h('<div class="stack"><progress max="1" value="0"></progress><div data-status>Starting…</div><small>You can close this; I\'ll let you know when it\'s done.</small></div>');
+      body.replaceChildren(view);
+      const onTick = (secs, p) => {
+        if (!p?.total) return;
+        $('progress', view).value = p.done / p.total;
+        $('[data-status]', view).innerHTML = `Checking ${esc(p.book)} — ${p.done} of ${p.total} recipes · ${secs}s`;
+      };
       try {
-        const r = await api('/api/courses/recheck', { method: 'POST' });
-        toast(`Classified ${r.classified} recipes`);
+        const r = await runJob('/api/courses/recheck', {}, { onTick, timeoutMs: 30 * 60_000 });
+        toast(`Re-checked ${r.classified} recipe courses`);
       } catch (err) {
         toast(esc(err.message), { error: true });
       }

@@ -140,11 +140,11 @@ export function createApp(store, { classify = classifyCourses } = {}) {
     }
     return { ...result, total: book.recipes.length };
   }));
-  const classifyBook = async (bookId, only = null) => {
+  const classifyBook = async (bookId, only = null, onBatch) => {
     const book = store.getBook(bookId);
     const todo = book.recipes.filter((r) => r.course_source !== 'user' && (!only || only.includes(r.id))).map((r) => ({ id: r.id, name: r.name }));
     if (!todo.length) return 0;
-    return store.setCourses(await classify(todo, book), 'ai');
+    return store.setCourses(await classify(todo, book, { onBatch }), 'ai');
   };
   const requireAi = () => {
     if (!aiEnabled()) throw new Error('AI is not set up on the server (set ANTHROPIC_API_KEY).');
@@ -155,12 +155,26 @@ export function createApp(store, { classify = classifyCourses } = {}) {
     if (classified) broadcast({ type: 'library-changed' });
     return { classified };
   }));
-  app.post('/api/courses/recheck', wrap(async () => {
+  let recheckJob = null;
+  app.post('/api/courses/recheck', wrap(() => {
     requireAi();
-    let classified = 0;
-    for (const b of store.listBooks()) classified += await classifyBook(b.id);
-    if (classified) broadcast({ type: 'library-changed' });
-    return { classified };
+    if (jobs.get(recheckJob)?.status === 'working') return { job: recheckJob };
+    const books = store.listBooks().map((b) => ({ id: b.id, title: b.title, count: store.getBook(b.id).recipes.filter((r) => r.course_source !== 'user').length }));
+    const total = books.reduce((n, b) => n + b.count, 0);
+    ({ job: recheckJob } = startJob(async (progress) => {
+      let classified = 0;
+      let before = 0;
+      progress({ done: 0, total, book: '' });
+      for (const b of books) {
+        progress({ done: before, book: b.title });
+        const onBatch = (n) => progress({ done: before + n });
+        classified += await classifyBook(b.id, null, onBatch);
+        before += b.count;
+      }
+      if (classified) broadcast({ type: 'library-changed' });
+      return { classified };
+    }));
+    return { job: recheckJob };
   }));
   app.post('/api/demo', wrap(async () => {
     if (store.stats().demo) throw new Error('The demo books are already on the shelf.');
@@ -252,7 +266,9 @@ export function createApp(store, { classify = classifyCourses } = {}) {
     const jobId = crypto.randomUUID();
     const job = { status: 'working', started: Date.now() };
     jobs.set(jobId, job);
-    work()
+    work((fields) => {
+      job.progress = { ...job.progress, ...fields };
+    })
       .then((result) => Object.assign(job, { status: 'done', result }))
       .catch((e) => Object.assign(job, { status: 'error', error: e.message || String(e) }))
       .finally(() => setTimeout(() => jobs.delete(jobId), 30 * 60 * 1000).unref());

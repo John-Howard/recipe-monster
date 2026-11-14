@@ -89,7 +89,8 @@ const CourseSchema = z.object({
   courses: z.array(z.object({ id: z.number(), course: z.enum(COURSES) })),
 });
 
-const BATCH = 150;
+const BATCH = 40;
+const CONCURRENCY = 3;
 
 export function applyCourseResults(batch, results) {
   const ids = new Set(batch.map((r) => r.id));
@@ -114,18 +115,25 @@ Give each recipe exactly one course:
 Recipes (id: name):
 ${batch.map((r) => `${r.id}: ${r.name}`).join('\n')}`;
 
-export async function classifyCourses(recipes, book) {
+export async function classifyCourses(recipes, book, { onBatch } = {}) {
+  const batches = [];
+  for (let i = 0; i < recipes.length; i += BATCH) batches.push(recipes.slice(i, i + BATCH));
   const out = [];
-  for (let i = 0; i < recipes.length; i += BATCH) {
-    const batch = recipes.slice(i, i + BATCH);
-    const res = await getClient().messages.parse({
-      model: MODEL,
-      max_tokens: 16000,
-      output_config: { effort: 'low', format: zodOutputFormat(CourseSchema) },
-      messages: [{ role: 'user', content: coursePrompt(book, batch) }],
-    });
-    if (res.stop_reason === 'refusal') throw new Error('The model declined to classify these recipes.');
-    out.push(...applyCourseResults(batch, res.parsed_output?.courses ?? []));
-  }
+  let done = 0;
+  const worker = async () => {
+    for (let batch = batches.shift(); batch; batch = batches.shift()) {
+      const res = await getClient().messages.parse({
+        model: MODEL,
+        max_tokens: 16000,
+        output_config: { effort: 'low', format: zodOutputFormat(CourseSchema) },
+        messages: [{ role: 'user', content: coursePrompt(book, batch) }],
+      });
+      if (res.stop_reason === 'refusal') throw new Error('The model declined to classify these recipes.');
+      out.push(...applyCourseResults(batch, res.parsed_output?.courses ?? []));
+      done += batch.length;
+      onBatch?.(done);
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   return out;
 }
