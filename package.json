@@ -1,0 +1,23 @@
+{
+  "name": "recipe-monster",
+  "version": "1.0.0",
+  "description": "Scan your cookbook indexes with your phone, then search and plan themed weekly menus.",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings server/index.js",
+    "demo": "node --no-warnings server/index.js --demo",
+    "dev": "node --no-warnings --watch server/index.js",
+    "seed:demo": "node --no-warnings server/seed-demo.js",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}

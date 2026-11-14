@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Recipe Monster Scanner</title>
+  <meta name="theme-color" content="#5fc27e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👾</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    main { padding: 1rem; }
+    .topbar { flex-wrap: nowrap !important; }
+    .brand b { font-size: 1.1rem; }
+    .scan-hero { display: flex; align-items: center; gap: .7rem; margin-bottom: 1rem; }
+    .scan-hero .monster { width: 64px; flex: none; }
+    .scan-hero h1 { font-size: 1.5rem; margin: 0; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Recipe Monster"></a>
+    <span class="spacer"></span>
+    <a class="btn sm ghost" href="/">Open planner</a>
+    <button class="theme-toggle" aria-label="Toggle dark mode">☀️</button>
+  </header>
+  <main>
+    <div class="scan-hero" data-hero></div>
+    <div id="scanner"></div>
+  </main>
+  <script type="module">
+    import { monsterSvg, initThemeToggle, chomp } from '/js/ui.js';
+    import { mountScanner } from '/js/scanner.js';
+    document.querySelector('.brand').innerHTML = `${monsterSvg()}<b>Recipe <span>Monster</span></b>`;
+    const hero = document.querySelector('[data-hero]');
+    hero.innerHTML = `${monsterSvg()}<div><h1>Feed me cookbooks!</h1><div class="muted small">Snap a barcode, then the index pages.</div></div>`;
+    hero.onclick = () => chomp(hero);
+    initThemeToggle(document.querySelector('.theme-toggle'));
+    const bookId = new URLSearchParams(location.hash.slice(1)).get('book');
+    mountScanner(document.getElementById('scanner'), { bookId, compact: true });
+  </script>
+</body>
+</html>

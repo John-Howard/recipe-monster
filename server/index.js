@@ -1,0 +1,197 @@
+import express from 'express';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { openDb, Store } from './db.js';
+import { parseIndexText } from './indexParser.js';
+import { generatePlan, rerollSlot } from './planner.js';
+import { lookupIsbn } from './isbn.js';
+import { aiEnabled, extractIndex, extractBook } from './ai.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT) || 3000;
+const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
+const COVERS_DIR = path.join(DATA_DIR, 'covers');
+fs.mkdirSync(COVERS_DIR, { recursive: true });
+
+export function createApp(store) {
+  const app = express();
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.use('/covers', express.static(COVERS_DIR, { maxAge: '30d' }));
+
+  // ---- live updates: the desktop hears about scans done on the phone ----
+  const clients = new Set();
+  const broadcast = (event) => {
+    const msg = `data: ${JSON.stringify(event)}\n\n`;
+    for (const res of clients) res.write(msg);
+  };
+  app.get('/api/events', (req, res) => {
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.flushHeaders();
+    res.write('retry: 3000\n\n');
+    clients.add(res);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    req.on('close', () => {
+      clearInterval(ping);
+      clients.delete(res);
+    });
+  });
+
+  const wrap = (fn) => async (req, res) => {
+    try {
+      const out = await fn(req, res);
+      if (!res.headersSent) res.json(out ?? { ok: true });
+    } catch (e) {
+      res.status(e.status || 400).json({ error: e.message || String(e) });
+    }
+  };
+  const id = (req) => Number(req.params.id);
+
+  app.get('/api/info', wrap(() => ({ lanUrls: lanUrls(), aiEnabled: aiEnabled(), stats: store.stats() })));
+
+  // ---- books ----
+  app.get('/api/books', wrap(() => store.listBooks()));
+  app.post('/api/books', wrap((req) => {
+    const bookId = store.saveBook(req.body);
+    const book = store.getBook(bookId);
+    broadcast({ type: 'book-added', book: { id: book.id, title: book.title } });
+    return book;
+  }));
+  app.get('/api/books/:id', wrap((req) => store.getBook(id(req)) || Promise.reject(Object.assign(new Error('Not found'), { status: 404 }))));
+  app.put('/api/books/:id', wrap((req) => {
+    store.saveBook(req.body, id(req));
+    broadcast({ type: 'library-changed' });
+    return store.getBook(id(req));
+  }));
+  app.delete('/api/books/:id', wrap((req) => {
+    store.deleteBook(id(req));
+    broadcast({ type: 'library-changed' });
+  }));
+  app.post('/api/books/:id/recipes', wrap((req) => {
+    const entries = Array.isArray(req.body.entries) ? req.body.entries : [];
+    const result = store.addRecipes(id(req), entries);
+    const book = store.getBook(id(req));
+    broadcast({ type: 'recipes-added', book: { id: book.id, title: book.title }, added: result.added, from: req.body.from || 'scan' });
+    return { ...result, total: book.recipes.length };
+  }));
+  app.post('/api/demo', wrap(async () => {
+    if (store.stats().demo) throw new Error('The demo books are already on the shelf.');
+    const { seedDemo } = await import('./seed-demo.js');
+    const r = seedDemo(store);
+    broadcast({ type: 'library-changed' });
+    return r;
+  }));
+  app.delete('/api/demo', wrap(() => {
+    const removed = store.deleteDemo();
+    broadcast({ type: 'library-changed' });
+    return { removed };
+  }));
+
+  // ---- recipes & search ----
+  app.put('/api/recipes/:id', wrap((req) => store.updateRecipe(id(req), req.body)));
+  app.delete('/api/recipes/:id', wrap((req) => store.deleteRecipe(id(req))));
+  app.post('/api/recipes/:id/cooked', wrap((req) => store.markCooked(id(req), req.body.cooked !== false)));
+  app.post('/api/recipes/lookup', wrap((req) => {
+    const ids = (req.body.ids || []).map(Number).filter(Boolean);
+    return ids.length ? store.recipesWhere(`r.id IN (${ids.join(',')})`) : [];
+  }));
+  app.post('/api/search', wrap((req) => store.search(req.body || {})));
+  app.get('/api/facets', wrap(() => store.facets()));
+
+  // ---- planning ----
+  const withRecipes = (slots) => {
+    const ids = [...new Set(slots.map((s) => s.recipe_id).filter(Boolean))];
+    const recipes = ids.length ? store.recipesWhere(`r.id IN (${ids.join(',')})`) : [];
+    return Object.fromEntries(recipes.map((r) => [r.id, r]));
+  };
+  app.post('/api/plan/generate', wrap((req) => {
+    const { theme = {}, slots = null } = req.body;
+    const result = generatePlan(store.allRecipes(), theme, slots);
+    return { ...result, recipes: withRecipes(result.slots) };
+  }));
+  app.post('/api/plan/reroll', wrap((req) => {
+    const { theme = {}, slots = [], index } = req.body;
+    const result = rerollSlot(store.allRecipes(), theme, slots, Number(index));
+    return { ...result, recipes: withRecipes([result.slot]) };
+  }));
+  app.post('/api/plan/preview', wrap((req) => {
+    // How many recipes would this theme give us? Used for the live counter in the theme builder.
+    const rows = store.search({ filters: req.body.chips || [], limit: 100000 });
+    const sample = rows.sort(() => Math.random() - 0.5).slice(0, 12).map((r) => r.name);
+    return { count: rows.length, books: new Set(rows.map((r) => r.book_id)).size, sample };
+  }));
+  app.get('/api/plans', wrap(() => store.listPlans()));
+  app.get('/api/plans/:id', wrap((req) => {
+    const p = store.getPlan(id(req));
+    if (!p) throw Object.assign(new Error('Not found'), { status: 404 });
+    return { ...p, recipes: withRecipes(p.slots) };
+  }));
+  app.post('/api/plans', wrap((req) => store.getPlan(store.savePlan(req.body))));
+  app.put('/api/plans/:id', wrap((req) => store.getPlan(store.savePlan(req.body, id(req)))));
+  app.delete('/api/plans/:id', wrap((req) => store.deletePlan(id(req))));
+  app.get('/api/themes', wrap(() => store.listThemes()));
+  app.post('/api/themes', wrap((req) => ({ id: store.saveTheme(req.body) })));
+  app.delete('/api/themes/:id', wrap((req) => store.deleteTheme(id(req))));
+
+  // ---- scanning ----
+  app.get('/api/isbn/:isbn', wrap(async (req) => lookupIsbn(req.params.isbn)));
+  app.post('/api/scan/parse', wrap((req) => ({ entries: parseIndexText(req.body.text || ''), via: 'ocr' })));
+  app.post('/api/scan/index', wrap(async (req) => {
+    if (!aiEnabled()) throw new Error('AI reading is not set up on the server (set ANTHROPIC_API_KEY). Use on-phone OCR instead.');
+    return { entries: await extractIndex(req.body.image), via: 'ai' };
+  }));
+  app.post('/api/scan/book', wrap(async (req) => {
+    if (!aiEnabled()) throw new Error('AI reading is not set up on the server (set ANTHROPIC_API_KEY).');
+    return extractBook(req.body.image);
+  }));
+  app.post('/api/covers', wrap((req) => {
+    const m = String(req.body.image || '').match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
+    if (!m) throw new Error('Expected an image');
+    const name = `${crypto.randomUUID()}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+    fs.writeFileSync(path.join(COVERS_DIR, name), Buffer.from(m[2], 'base64'));
+    return { url: `/covers/${name}` };
+  }));
+
+  // ---- backup ----
+  app.get('/api/export', (req, res) => {
+    res.set('Content-Disposition', `attachment; filename="recipe-monster-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(store.exportAll());
+  });
+  app.post('/api/import', wrap((req) => {
+    const r = store.importAll(req.body);
+    broadcast({ type: 'library-changed' });
+    return r;
+  }));
+
+  app.get('/scan', (req, res) => res.redirect('/scan.html'));
+  return app;
+}
+
+export function lanUrls(port = PORT) {
+  const urls = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal) urls.push(`http://${a.address}:${port}`);
+    }
+  }
+  // Prefer typical home-network ranges first.
+  return urls.sort((a, b) => Number(/\/\/(192\.168|10\.)/.test(b)) - Number(/\/\/(192\.168|10\.)/.test(a)));
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const store = new Store(openDb());
+  if ((process.env.SEED_DEMO === '1' || process.argv.includes('--demo')) && store.stats().books === 0) {
+    const { seedDemo } = await import('./seed-demo.js');
+    seedDemo(store);
+  }
+  createApp(store).listen(PORT, '0.0.0.0', () => {
+    const urls = lanUrls();
+    console.log(`\n  🍲  Recipe Monster is hungry and listening!\n`);
+    console.log(`  On this computer:  http://localhost:${PORT}`);
+    for (const u of urls) console.log(`  On your phone:     ${u}/scan.html`);
+    console.log(`  AI page reading:   ${aiEnabled() ? 'ON (Claude vision)' : 'off: set ANTHROPIC_API_KEY to enable; on-phone OCR is used instead'}\n`);
+  });
+}
