@@ -58,6 +58,29 @@ Chips of the same kind mean *either* (Fast 800 **or** Slimming World); different
 
 The planner fits recipes to meals (breakfast slots only get breakfast recipes, lunches lean towards soups and salads), avoids repeats and back-to-back main ingredients or cuisines, prefers favourites and higher ratings, and skips what you've cooked in the last fortnight (tick ✅ on a card when you cook it). **Fewer books off the shelf** clusters the week into fewer books.
 
+## Running in Docker (OrbStack) with HTTPS
+
+Phone cameras only work on a secure origin, so the container serves HTTPS with a local [mkcert](https://github.com/FiloSottile/mkcert) certificate.
+
+```
+scripts/make-cert.sh
+PUBLIC_URL=https://<lan-ip>:3443 docker compose up -d --build
+```
+
+Open https://localhost:3443 on the Mac. Your library lives in `./data`; `ANTHROPIC_API_KEY` and `RECIPE_MONSTER_MODEL` are read from the environment or a `.env` file.
+
+To pull the API key from 1Password instead (nothing secret is written to disk; `.env.1password` only holds an `op://` reference):
+
+```
+PUBLIC_URL=https://<lan-ip>:3443 op run --env-file=.env.1password -- docker compose up -d --build
+```
+
+On the phone, AirDrop `certs/rootCA.pem` to it and install the profile. On iOS, then enable full trust in Settings → General → About → Certificate Trust Settings. On Android: Settings → Security → Install certificate → CA certificate. Then open `https://<lan-ip>:3443/scan.html`.
+
+If the Mac's LAN IP changes, re-run `scripts/make-cert.sh` and update `PUBLIC_URL`.
+
+Outside Docker, set `TLS_CERT` and `TLS_KEY` (file paths) to serve HTTPS, and `PUBLIC_URL` (comma-separated base URLs) to override the addresses shown for phones.
+
 ## Project layout
 
 ```

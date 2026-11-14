@@ -1,6 +1,8 @@
 import express from 'express';
 import os from 'node:os';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -190,11 +192,13 @@ export function createApp(store) {
   return app;
 }
 
-export function lanUrls(port = PORT) {
+export function lanUrls({ port = PORT, env = process.env } = {}) {
+  if (env.PUBLIC_URL) return env.PUBLIC_URL.split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean);
+  const scheme = env.TLS_CERT && env.TLS_KEY ? 'https' : 'http';
   const urls = [];
   for (const list of Object.values(os.networkInterfaces())) {
     for (const a of list || []) {
-      if (a.family === 'IPv4' && !a.internal) urls.push(`http://${a.address}:${port}`);
+      if (a.family === 'IPv4' && !a.internal) urls.push(`${scheme}://${a.address}:${port}`);
     }
   }
   // Prefer typical home-network ranges first.
@@ -207,10 +211,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     const { seedDemo } = await import('./seed-demo.js');
     seedDemo(store);
   }
-  const server = createApp(store).listen(PORT, '0.0.0.0', () => {
+  const { TLS_CERT, TLS_KEY } = process.env;
+  const tls = Boolean(TLS_CERT && TLS_KEY);
+  const app = createApp(store);
+  const server = tls
+    ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, app)
+    : http.createServer(app);
+  server.listen(PORT, '0.0.0.0', () => {
     const urls = lanUrls();
     console.log(`\n  🍲  Recipe Monster is hungry and listening!\n`);
-    console.log(`  On this computer:  http://localhost:${PORT}`);
+    console.log(`  On this computer:  ${tls ? 'https' : 'http'}://localhost:${PORT}`);
     for (const u of urls) console.log(`  On your phone:     ${u}/scan.html`);
     console.log(`  AI page reading:   ${aiEnabled() ? 'ON (Claude vision)' : 'off: set ANTHROPIC_API_KEY to enable; on-phone OCR is used instead'}\n`);
   });
