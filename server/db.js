@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { validatePlan } from './validatePlan.js';
 import { autoTags, guessCourse, COURSES } from './tagger.js';
 
 const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
@@ -503,7 +504,7 @@ export class Store {
       }
     }
     for (const t of data.themes || []) this.saveTheme(t);
-    if (data.current_plan) this.saveCurrentPlan(data.current_plan);
+    if (data.current_plan && !validatePlan(data.current_plan)) this.saveCurrentPlan(data.current_plan);
     return { books, recipes };
   }
 }

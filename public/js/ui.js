@@ -88,8 +88,10 @@ export function debounce(fn, ms = 250) {
 }
 
 const PALETTE = ['#e8603c', '#3fa66b', '#8a5bd6', '#2b9bb3', '#d6a21e', '#d64b7a', '#4e7ad6', '#c46a2b'];
+const SAFE_COLOUR = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(hsl|rgb)\(\s*[\d.]+(deg)?[\s,]+[\d.]+%?[\s,]+[\d.]+%?\s*\))$/i;
 export function bookColour(book) {
-  if (book?.colour || book?.book_colour) return book.colour || book.book_colour;
+  const own = book?.colour || book?.book_colour;
+  if (typeof own === 'string' && SAFE_COLOUR.test(own.trim())) return own.trim();
   const s = String(book?.title || book?.book_title || book?.id || '');
   let n = 0;
   for (const c of s) n = (n * 31 + c.charCodeAt(0)) >>> 0;
@@ -286,6 +288,7 @@ export function loadScript(src) {
 // ---------- the theme chip picker ----------
 // chips: [{type:'tag'|'author'|'book'|'text'|'favourite', value, label?, exclude?}]
 const KIND = { tag: 'tag', author: 'author', book: 'book', text: 'words', favourite: '' };
+export const chipClass = (c) => (c.type in KIND ? c.type : '');
 export function chipLabel(c) {
   if (c.type === 'favourite') return '❤️ Favourites';
   return esc(c.label || c.value);
@@ -302,7 +305,7 @@ export function chipInput({ facets, chips = [], placeholder = 'Add a diet, autho
   const render = () => {
     box.innerHTML = '';
     chips.forEach((c, i) => {
-      const chip = h(`<span class="chip ${c.type} ${c.exclude ? 'exclude' : ''}" title="Click to switch between 'include' and 'leave out'">
+      const chip = h(`<span class="chip ${chipClass(c)} ${c.exclude ? 'exclude' : ''}" title="Click to switch between 'include' and 'leave out'">
         ${KIND[c.type] ? `<span class="kind">${c.exclude ? 'not ' : ''}${KIND[c.type]}</span>` : ''}${chipLabel(c)}
         <button aria-label="Remove">✕</button></span>`);
       chip.onclick = (e) => {

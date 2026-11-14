@@ -1,3 +1,4 @@
+import { validatePlan } from './validatePlan.js';
 import express from 'express';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -219,7 +220,8 @@ export function createApp(store, { classify = classifyCourses } = {}) {
   app.get('/api/current-plan', wrap(() => store.getCurrentPlan()));
   app.put('/api/current-plan', wrap((req) => {
     const { plan, client } = req.body;
-    if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw Object.assign(new Error('Plan must be an object'), { status: 400 });
+    const problem = validatePlan(plan);
+    if (problem) throw Object.assign(new Error(problem), { status: 400 });
     const version = store.saveCurrentPlan(plan);
     broadcast({ type: 'current-plan', version, client });
     return { version };
