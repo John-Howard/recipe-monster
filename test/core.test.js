@@ -6,6 +6,7 @@ import { normaliseIsbn } from '../server/isbn.js';
 import { openDb, Store } from '../server/db.js';
 import { generatePlan, rerollSlot } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
+import { lanUrls } from '../server/index.js';
 
 test('index parser handles headings, sub-entries, wraps, markers and OCR digits', () => {
   const out = parseIndexText(`INDEX
@@ -88,4 +89,17 @@ test('adding recipes skips duplicates; export/import round-trips', () => {
   const s2 = new Store(openDb(':memory:'));
   assert.deepEqual(s2.importAll(dump), { books: 1, recipes: 1 });
   assert.equal(s2.search({ filters: [{ type: 'tag', value: 'Fast 800' }] }).length, 1);
+});
+
+test('lanUrls uses PUBLIC_URL when set, stripping trailing slashes', () => {
+  const env = { PUBLIC_URL: 'https://192.168.1.162:3443/, https://mac.local:3443' };
+  assert.deepEqual(lanUrls({ env }), ['https://192.168.1.162:3443', 'https://mac.local:3443']);
+});
+
+test('lanUrls scans interfaces with http, or https when TLS is on', () => {
+  const plain = lanUrls({ env: {}, port: 3000 });
+  assert.ok(plain.every((u) => u.startsWith('http://') && u.endsWith(':3000')));
+  const tls = lanUrls({ env: { TLS_CERT: 'c', TLS_KEY: 'k' }, port: 3000 });
+  assert.ok(tls.every((u) => u.startsWith('https://')));
+  assert.equal(tls.length, plain.length);
 });

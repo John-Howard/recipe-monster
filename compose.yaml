@@ -1,0 +1,19 @@
+services:
+  recipe-monster:
+    build: .
+    container_name: recipe-monster
+    ports:
+      - "3443:3443"
+    volumes:
+      - ./data:/data
+      - ./certs:/certs:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TLS_CERT: /certs/cert.pem
+      TLS_KEY: /certs/key.pem
+      PUBLIC_URL: ${PUBLIC_URL:-https://localhost:3443}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RECIPE_MONSTER_MODEL: ${RECIPE_MONSTER_MODEL:-}
+    restart: unless-stopped
