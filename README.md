@@ -34,6 +34,12 @@ Either way you always get a review screen to fix names and page numbers before a
 
 Tips: good light, one page per photo, book held flat, page filling the frame.
 
+**When a scan comes out wrong.** Each photographed page keeps its own results, so a bad page can be thrown away without losing the others:
+
+- Every page thumbnail has **↺ / ↻** (rotate and read again) and **🗑️** (delete the page and everything read from it). Tap a thumbnail to see the photo and what was read from it. From there you can turn it upside down, read it again, switch that page to AI reading, or edit the raw OCR text and re-read it.
+- With on-device OCR, a page that reads as gibberish (few recipes or low confidence) is automatically retried at 90°, 270° and 180°, and the best result is kept.
+- On the review screen recipes are grouped by page, with **🔁 Re-read** and **🗑️ Delete page** on each group. Recipes that also appear on an earlier page are shown struck through and only saved once.
+
 ## Themes
 
 Themes are built from chips:

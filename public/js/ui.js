@@ -185,7 +185,8 @@ export function confetti(n = 120) {
 }
 
 // ---------- image helpers (used by the scanner) ----------
-export async function fileToDataUrl(file, { maxSide = 2000, quality = 0.85, grey = false } = {}) {
+// rotate: clockwise degrees (0, 90, 180, 270) applied on top of the photo's own EXIF orientation.
+export async function fileToDataUrl(file, { maxSide = 2000, quality = 0.85, grey = false, rotate = 0 } = {}) {
   let bitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -199,12 +200,17 @@ export async function fileToDataUrl(file, { maxSide = 2000, quality = 0.85, grey
   }
   const w = bitmap.width, hgt = bitmap.height;
   const scale = Math.min(1, maxSide / Math.max(w, hgt));
+  const dw = Math.round(w * scale), dh = Math.round(hgt * scale);
+  const turn = ((Number(rotate) % 360) + 360) % 360;
+  const sideways = turn === 90 || turn === 270;
   const c = document.createElement('canvas');
-  c.width = Math.round(w * scale);
-  c.height = Math.round(hgt * scale);
+  c.width = sideways ? dh : dw;
+  c.height = sideways ? dw : dh;
   const ctx = c.getContext('2d');
   if (grey) ctx.filter = 'grayscale(1) contrast(1.25)';
-  ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((turn * Math.PI) / 180);
+  ctx.drawImage(bitmap, -dw / 2, -dh / 2, dw, dh);
   return c.toDataURL('image/jpeg', quality);
 }
 

@@ -378,3 +378,23 @@ table.recipes td.act { width: 40px; }
   .modal-back { position: static; background: none; }
   .modal { max-height: none; box-shadow: none; border: none; }
 }
+
+/* ---------- scanned page controls ---------- */
+.pagethumb { cursor: pointer; }
+.pagethumb:focus-visible { outline: 4px solid var(--mustard); }
+.pagethumb .pno { position: absolute; top: 6px; left: 6px; background: var(--card); border: 2px solid var(--line); border-radius: 999px; padding: 0 .45rem; font-size: .7rem; font-weight: 900; }
+.pagethumb .pagetools { position: absolute; top: 6px; right: 6px; display: flex; flex-direction: column; gap: 4px; }
+.pagethumb .pagetools .icon-btn { width: 30px; height: 30px; font-size: .9rem; border: 2px solid var(--line); box-shadow: var(--shadow-sm); }
+.pagethumb .pagetools .icon-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.pagethumb.bad { border-color: var(--tomato); box-shadow: 0 0 0 3px var(--tomato-2); }
+.pagethumb.bad .status { background: var(--tomato-2); }
+.pagethumb img.hidden + .pno { top: 6px; }
+.pagethumb:has(img.hidden)::before { content: '📋'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 2rem; }
+.inspect-img { background: var(--bg-2); border: 2px solid var(--line); border-radius: var(--radius-sm); padding: .4rem; text-align: center; }
+.inspect-img img { max-height: 42vh; border-radius: 6px; }
+.inspect-list { max-height: 30vh; overflow: auto; padding: .5rem .7rem; border: 2px dashed var(--soft-line); border-radius: var(--radius-sm); font-size: .9rem; }
+.inspect-list b { display: inline-block; min-width: 2.6em; color: var(--ink-2); }
+.revpage { display: flex; gap: .6rem; align-items: center; margin-top: .9rem; padding: .45rem .6rem; border: 2px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-2); flex-wrap: wrap; }
+.revpage:first-child { margin-top: 0; }
+.revpage img, .revpage .revicon { width: 40px; height: 52px; object-fit: cover; border-radius: 4px; border: 2px solid var(--line); flex: none; display: grid; place-items: center; font-size: 1.3rem; background: var(--card); }
+.rev input:disabled { opacity: .45; }
