@@ -11,7 +11,8 @@ names=(localhost 127.0.0.1 ::1 recipe-monster.orb.local "$host")
 
 mkcert -cert-file certs/cert.pem -key-file certs/key.pem "${names[@]}"
 cp "$(mkcert -CAROOT)/rootCA.pem" certs/rootCA.pem
-chmod 644 certs/cert.pem certs/key.pem certs/rootCA.pem
+chmod 644 certs/cert.pem certs/rootCA.pem
+chmod 600 certs/key.pem
 
 echo
 echo "Certificate covers: ${names[*]}"
