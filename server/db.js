@@ -98,7 +98,7 @@ export class Store {
   }
 
   backfillCourses() {
-    const rows = this.recipesWhere("COALESCE(r.course, '') = ''");
+    const rows = this.recipesWhere("COALESCE(r.course, '') = '' OR r.course_source = 'rules'");
     if (!rows.length) return;
     this.tx(() => {
       for (const r of rows) this.setRulesCourse(r);
@@ -302,6 +302,85 @@ export class Store {
     for (const t of tags) if (t) ins.run(id, t, source);
   }
 
+  listTags() {
+    const rows = this.db
+      .prepare(
+        `SELECT tag, SUM(r) AS recipes, SUM(b) AS books FROM (
+           SELECT tag, COUNT(*) AS r, 0 AS b FROM recipe_tags GROUP BY tag
+           UNION ALL SELECT tag, 0, COUNT(*) FROM book_tags GROUP BY tag
+         ) GROUP BY tag`
+      )
+      .all();
+    const groups = new Map();
+    for (const row of rows) {
+      const g = groups.get(row.tag.toLowerCase()) || { tag: row.tag, top: 0, recipes: 0, books: 0 };
+      if (row.recipes + row.books > g.top) Object.assign(g, { tag: row.tag, top: row.recipes + row.books });
+      g.recipes += Number(row.recipes);
+      g.books += Number(row.books);
+      groups.set(row.tag.toLowerCase(), g);
+    }
+    return [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, { tag, recipes, books }]) => ({ tag, recipes, books }));
+  }
+
+  tagHolders(tag) {
+    const key = String(tag || '').toLowerCase();
+    const col = (table, id) => this.db.prepare(`SELECT DISTINCT ${id} AS id FROM ${table} WHERE lower(tag) = ?`).all(key).map((r) => r.id);
+    return { recipeIds: col('recipe_tags', 'recipe_id'), bookIds: col('book_tags', 'book_id') };
+  }
+
+  renameTag(from, to) {
+    const name = tidyTag(to);
+    if (!name) throw new Error('Tag name is required');
+    const key = String(from || '').toLowerCase();
+    return this.tx(() => {
+      const { recipeIds, bookIds } = this.tagHolders(from);
+      const hasRecipeTag = this.db.prepare('SELECT 1 FROM recipe_tags WHERE recipe_id = ? AND lower(tag) = ?');
+      const hasBookTag = this.db.prepare('SELECT 1 FROM book_tags WHERE book_id = ? AND lower(tag) = ?');
+      this.db.prepare('DELETE FROM recipe_tags WHERE lower(tag) = ?').run(key);
+      this.db.prepare('DELETE FROM book_tags WHERE lower(tag) = ?').run(key);
+      for (const id of recipeIds) if (!hasRecipeTag.get(id, name.toLowerCase())) this.setRecipeTags(id, [name], 'user');
+      for (const id of bookIds) if (!hasBookTag.get(id, name.toLowerCase())) this.db.prepare('INSERT INTO book_tags (book_id, tag) VALUES (?, ?)').run(id, name);
+      this.reindexTagged(recipeIds, bookIds);
+      return { recipes: recipeIds.length, books: bookIds.length };
+    });
+  }
+
+  deleteTag(tag) {
+    const key = String(tag || '').toLowerCase();
+    return this.tx(() => {
+      const { recipeIds, bookIds } = this.tagHolders(tag);
+      this.db.prepare('DELETE FROM recipe_tags WHERE lower(tag) = ?').run(key);
+      this.db.prepare('DELETE FROM book_tags WHERE lower(tag) = ?').run(key);
+      this.reindexTagged(recipeIds, bookIds);
+      return { recipes: recipeIds.length, books: bookIds.length };
+    });
+  }
+
+  reindexTagged(recipeIds, bookIds) {
+    for (const id of recipeIds) this.reindexRecipe(id);
+    for (const id of bookIds) this.reindexBook(id);
+  }
+
+  bulkTagRecipes(ids, { add = [], remove = [] } = {}) {
+    if (!Array.isArray(ids) || ids.length > 1000 || !ids.every(Number.isInteger)) throw new Error('ids must be up to 1000 recipe ids');
+    const adds = uniq(add.map(tidyTag));
+    const removes = remove.map((t) => tidyTag(t).toLowerCase()).filter(Boolean);
+    return this.tx(() => {
+      const del = this.db.prepare('DELETE FROM recipe_tags WHERE recipe_id = ? AND lower(tag) = ?');
+      const has = this.db.prepare('SELECT 1 FROM recipe_tags WHERE recipe_id = ? AND lower(tag) = ?');
+      const exists = this.db.prepare('SELECT 1 FROM recipes WHERE id = ?');
+      let updated = 0;
+      for (const id of ids) {
+        if (!exists.get(id)) continue;
+        for (const t of removes) del.run(id, t);
+        for (const t of adds) if (!has.get(id, t.toLowerCase())) this.setRecipeTags(id, [t], 'user');
+        this.reindexRecipe(id);
+        updated++;
+      }
+      return updated;
+    });
+  }
+
   getRecipe(id) {
     return this.recipesWhere('r.id = ?', [id])[0] || null;
   }
@@ -460,9 +539,16 @@ export class Store {
   getCurrentPlan() {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'current_plan'").get();
     const ver = this.db.prepare("SELECT value FROM settings WHERE key = 'current_plan_version'").get();
-    return { plan: row ? JSON.parse(row.value) : null, version: ver ? Number(ver.value) : 0 };
+    const plan = row ? JSON.parse(row.value) : null;
+    if (plan) plan.recipes = this.recipesById((plan.slots || []).map((s) => s.recipe_id));
+    return { plan, version: ver ? Number(ver.value) : 0 };
   }
-  saveCurrentPlan(plan) {
+  recipesById(ids) {
+    const valid = [...new Set(ids.filter(Number.isInteger))];
+    const recipes = valid.length ? this.recipesWhere(`r.id IN (${valid.join(',')})`) : [];
+    return Object.fromEntries(recipes.map((r) => [r.id, r]));
+  }
+  saveCurrentPlan({ recipes, ...plan }) {
     const version = this.getCurrentPlan().version + 1;
     const put = this.db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at");
     put.run('current_plan', JSON.stringify(plan));

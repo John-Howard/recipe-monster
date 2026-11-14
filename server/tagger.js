@@ -73,12 +73,13 @@ export function autoTags(name) {
 // Course tags drive which meal slot a recipe is suitable for.
 const NON_MAIN = ['breakfast', 'dessert', 'baking', 'sides', 'sauces', 'drinks', 'snacks'];
 
-export const COURSES = ['starter', 'main', 'dessert', 'side', 'breakfast', 'other'];
+export const COURSES = ['starter', 'main', 'dessert', 'side', 'breakfast', 'snack', 'other'];
 
 const PROTEINS = ['chicken', 'beef', 'lamb', 'pork', 'turkey', 'duck', 'fish', 'seafood', 'pulses', 'tofu'];
 const MAIN_TYPES = ['curry', 'pasta', 'rice', 'noodles', 'stir-fry', 'pie', 'stew', 'traybake', 'burger', 'pizza', 'tacos & wraps', 'bbq'];
 const NOT_PROTEIN = /green beans?|anchov\w*/g;
-const OTHER_NAME = /kombucha|kefir|crackers?\b|trail mix|granola bars?|spreads?\b|dressings?\b|tipple|cooler|cordial|lemonade|cocktail|mocktail|juice|butters?\s*$|cashew cream|drizzle\s*$|bouillon/;
+const OTHER_NAME = /kombucha|kefir|spreads?\b|dressings?\b|tipple|cooler|cordial|lemonade|cocktail|mocktail|juice|butters?\s*$|cashew cream|drizzle\s*$|bouillon/;
+const SNACK_NAME = /trail mix|popcorn|crackers?\b|crisps\b|bliss balls?|energy balls?|\bbites\b|flapjacks?|(cereal|granola|protein|energy|fridge) bars?|roasted (chickpeas|nuts)|\b(walnuts|almonds|cashews|pecans|hazelnuts|pistachios|peanuts|nuts)\b.*\b(salt|spice|paprika|chilli|thyme|rosemary|herbs?)/;
 const DESSERT_FORM = /\bfool\b|granita|sorbet|frozen yog|ice cream/;
 const BAKE_NAME = /muffins?|scones?|biscuits?|cookies?|\bbread\b|loaf|\bbuns?\b/;;
 const STRONG_SWEET = /chocolate|\bfruit|(lime|lemon|orange|mango|coconut|rhubarb|banana|passion ?fruit).*\btart\b|ganache|frosting|icing|truffle|fudge|chia pots?|compote|\bbars\b|baked (pears?|apples?)|jelly/;
@@ -92,6 +93,7 @@ export function guessCourse(name, tags = []) {
   const fromName = new Set(autoTags(n.replace(NOT_PROTEIN, '')));
   const isMain = PROTEINS.some((p) => t.has(p) && fromName.has(p)) || MAIN_TYPES.some((m) => t.has(m)) || MAIN_NAME.test(n);
   if (DESSERT_FORM.test(n)) return 'dessert';
+  if (SNACK_NAME.test(n) && !STARTER_NAME.test(n)) return 'snack';
   if (OTHER_NAME.test(n)) return 'other';
   if (t.has('dessert') || STRONG_SWEET.test(n)) return 'dessert';
   if (STARTER_NAME.test(n)) return 'starter';
@@ -99,7 +101,8 @@ export function guessCourse(name, tags = []) {
   if (t.has('breakfast')) return 'breakfast';
   if (isMain) return 'main';
   if (WEAK_SWEET.test(n)) return 'dessert';
-  if (['baking', 'sauces', 'drinks', 'snacks'].some((c) => t.has(c))) return 'other';
+  if (t.has('snacks')) return 'snack';
+  if (['baking', 'sauces', 'drinks'].some((c) => t.has(c))) return 'other';
   return 'side';
 }
 
@@ -135,7 +138,7 @@ function courseFits(course, t, meal) {
     case 'dessert':
       return course === 'dessert';
     case 'snack':
-      return course === 'other';
+      return course === 'snack';
     default:
       return course === 'main';
   }

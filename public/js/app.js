@@ -3,6 +3,7 @@ import {
   chipInput, chipLabel, chipClass, bookColour, tagPills, MEAL_EMOJI, initThemeToggle, loadScript,
 } from './ui.js';
 import { mountScanner } from './scanner.js';
+import { loadTagList, tagEditor, manageTags, selectionBar } from './tags.js';
 
 const MEALS = ['breakfast', 'lunch', 'starter', 'dinner', 'dessert'];
 const SIDEBAR_MEALS = ['breakfast', 'lunch', 'dinner'];
@@ -403,7 +404,7 @@ async function viewPlan() {
       if (a === 'clear') { ADDABLE.includes(meal) ? plan.slots.splice(idx, 1) : Object.assign(s, { recipe_id: null, locked: false }); savePlanLocal(); drawBoard(); }
       if (a === 'cooked') {
         s.cooked = !s.cooked;
-        const upd = await api(`/api/recipes/${r.id}/cooked`, { method: 'POST', body: { cooked: s.cooked } });
+        const upd = await api(`/api/recipes/${Number(r.id)}/cooked`, { method: 'POST', body: { cooked: s.cooked } });
         plan.recipes[r.id] = upd;
         savePlanLocal();
         drawBoard();
@@ -571,7 +572,7 @@ function recipePicker(title, themeChips, onPick) {
     for (const r of rows) {
       const c = h(`<div class="rcard" style="--book:${bookColour(r)}"><div class="name">${esc(r.name)}</div>
         <div class="small muted">📖 ${esc(r.book_title)}${r.page ? ` · p.${esc(r.page)}` : ''}</div><div>${tagPills(r, 4)}</div>
-        <div class="row"><span class="small muted">${r.favourite ? '❤️ ' : ''}${r.times_cooked ? `cooked ${r.times_cooked}×` : 'never cooked'}</span><span class="spacer"></span><button class="btn sm go">Use this</button></div></div>`);
+        <div class="row"><span class="small muted">${r.favourite ? '❤️ ' : ''}${r.times_cooked ? `cooked ${esc(r.times_cooked)}×` : 'never cooked'}</span><span class="spacer"></span><button class="btn sm go">Use this</button></div></div>`);
       $('button', c).onclick = () => { m.close(); onPick(r); };
       results.append(c);
     }
@@ -590,11 +591,14 @@ function recipeModal(r, onChange) {
     <div class="row"><label class="field" style="width:110px"><span>Page</span><input name="page" value="${esc(r.page)}"></label>
       <div><b class="small">Rating</b><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-star="${n}" class="${n <= r.rating ? 'on' : ''}">⭐</button>`).join('')}</div></div>
       <button type="button" class="heart ${r.favourite ? 'on' : ''}" data-fav title="Favourite">❤️</button>
-      <span class="muted small">${r.times_cooked ? `Cooked ${r.times_cooked}× · last ${esc(r.last_cooked || '')}` : 'Never cooked yet'}</span></div>
-    <label class="field"><span>Course</span><select name="course">${['starter', 'main', 'dessert', 'side', 'breakfast', 'other'].map((c) => `<option ${c === r.course ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
-    <label class="field"><span>Tags <span class="muted small">(comma separated; book tags: ${esc(r.bookTags.join(', ') || 'none')})</span></span><input name="tags" value="${esc(r.recipeTags.join(', '))}"></label>
+      <span class="muted small">${r.times_cooked ? `Cooked ${esc(r.times_cooked)}× · last ${esc(r.last_cooked || '')}` : 'Never cooked yet'}</span></div>
+    <label class="field"><span>Course</span><select name="course">${['starter', 'main', 'dessert', 'side', 'breakfast', 'snack', 'other'].map((c) => `<option ${c === r.course ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+    <div class="field"><span>Tags <span class="muted small">(Enter or comma to add; book tags: ${esc(r.bookTags.join(', ') || 'none')})</span></span><div data-tags></div></div>
     <label class="field"><span>Notes</span><textarea name="notes" rows="3" placeholder="e.g. Double the garlic. Kids loved it.">${esc(r.notes || '')}</textarea></label>
     <div class="row"><button class="btn ghost" data-del>🗑️ Delete recipe</button><span class="spacer"></span><button class="btn go" data-save>Save</button></div></div>`);
+  const tagEd = tagEditor(r.recipeTags);
+  $('[data-tags]', body).append(tagEd.el);
+  loadTagList();
   let rating = r.rating, fav = r.favourite;
   $$('[data-star]', body).forEach((b) => (b.onclick = () => {
     rating = Number(b.dataset.star) === rating ? 0 : Number(b.dataset.star);
@@ -603,11 +607,11 @@ function recipeModal(r, onChange) {
   $('[data-fav]', body).onclick = (e) => { fav = !fav; e.currentTarget.classList.toggle('on', !!fav); };
   const m = modal('🍽️ Recipe', body);
   $('[data-save]', body).onclick = async () => {
-    const upd = await api(`/api/recipes/${r.id}`, {
+    const upd = await api(`/api/recipes/${Number(r.id)}`, {
       method: 'PUT',
       body: { name: $('[name=name]', body).value, page: $('[name=page]', body).value, notes: $('[name=notes]', body).value, rating, favourite: fav,
         ...($('[name=course]', body).value !== r.course && { course: $('[name=course]', body).value }),
-        tags: $('[name=tags]', body).value.split(',').map((t) => t.trim()).filter(Boolean) },
+        tags: tagEd.get() },
     });
     if (plan.recipes[r.id]) { plan.recipes[r.id] = upd; savePlanLocal(); }
     m.close();
@@ -616,7 +620,7 @@ function recipeModal(r, onChange) {
   };
   $('[data-del]', body).onclick = async () => {
     if (!(await confirmBox(`Delete <b>${esc(r.name)}</b>?`, { ok: 'Delete', danger: true }))) return;
-    await api(`/api/recipes/${r.id}`, { method: 'DELETE' });
+    await api(`/api/recipes/${Number(r.id)}`, { method: 'DELETE' });
     m.close();
     onChange ? onChange(null) : route();
   };
@@ -632,7 +636,13 @@ async function viewSearch() {
     <div class="row"><h1 style="margin:0">🔎 Find a recipe</h1><span class="spacer"></span><span class="muted" data-count></span></div>
     <div class="searchbar"><input type="search" placeholder="Try “chicken curry”, “lentil”, “pie”…" aria-label="Search recipes" autofocus><label class="toggle"><input type="checkbox" data-fav> ❤️ only</label></div>
     <div data-chips></div>
+    <label class="toggle"><input type="checkbox" data-all> Select all</label>
     <div class="results"></div></div>`);
+  const selection = new Set();
+  let shown = [];
+  const bar = selectionBar(selection, (rerun = true) => (rerun ? run() : draw()));
+  el.append(bar);
+  loadTagList();
   view.append(el);
   const input = $('input[type=search]', el);
   const chipper = chipInput({ facets: () => facets, chips, placeholder: 'Filter by diet, author, book…', onChange: () => run() });
@@ -641,36 +651,50 @@ async function viewSearch() {
   const run = debounce(async () => {
     const rows = await api('/api/search', { method: 'POST', body: { q: input.value, filters: chips, favourites: $('[data-fav]', el).checked, limit: 300 } });
     $('[data-count]', el).textContent = `${rows.length}${rows.length === 300 ? '+' : ''} recipes`;
-    results.innerHTML = '';
-    if (!rows.length) results.append(h(`<div class="board-empty" style="grid-column:1/-1">${monsterSvg({ mood: 'sad' })}<p>Nothing tasty here. Try another word?</p></div>`));
-    for (const r of rows) results.append(resultCard(r, run));
+    shown = rows;
+    draw();
   }, 180);
+  const draw = () => {
+    results.innerHTML = '';
+    if (!shown.length) results.append(h(`<div class="board-empty" style="grid-column:1/-1">${monsterSvg({ mood: 'sad' })}<p>Nothing tasty here. Try another word?</p></div>`));
+    for (const r of shown) results.append(resultCard(r, run, selection, () => bar.update()));
+    $('[data-all]', el).checked = shown.length > 0 && shown.every((r) => selection.has(r.id));
+    bar.update();
+  };
+  $('[data-all]', el).onchange = (e) => {
+    for (const r of shown) e.target.checked ? selection.add(r.id) : selection.delete(r.id);
+    draw();
+  };
   input.oninput = run;
   $('[data-fav]', el).onchange = run;
   run();
 }
 
-function resultCard(r, refresh) {
+function resultCard(r, refresh, selection, onSelect) {
   const c = h(`<div class="rcard" style="--book:${bookColour(r)}">
-    <div class="row" style="flex-wrap:nowrap;align-items:flex-start"><div class="name" style="flex:1;cursor:pointer">${esc(r.name)}</div>
+    <div class="row" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" class="pick" aria-label="Select ${esc(r.name)}" ${selection.has(r.id) ? 'checked' : ''}><div class="name" style="flex:1;cursor:pointer">${esc(r.name)}</div>
       <button class="heart ${r.favourite ? 'on' : ''}" title="Favourite">❤️</button></div>
     <div class="small muted">📖 <b>${esc(r.book_title)}</b>${r.page ? ` · p.${esc(r.page)}` : ''}</div>
     <div>${tagPills(r, 4)}</div>
     <div class="row"><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-star="${n}" class="${n <= r.rating ? 'on' : ''}" aria-label="${n} stars">⭐</button>`).join('')}</div>
       <span class="spacer"></span><button class="btn sm sun" data-add>＋ Plan</button></div></div>`);
+  $('.pick', c).onchange = (e) => {
+    e.target.checked ? selection.add(r.id) : selection.delete(r.id);
+    onSelect();
+  };
   $('.heart', c).onclick = async (e) => {
-    const upd = await api(`/api/recipes/${r.id}`, { method: 'PUT', body: { favourite: !r.favourite } });
+    const upd = await api(`/api/recipes/${Number(r.id)}`, { method: 'PUT', body: { favourite: !r.favourite } });
     Object.assign(r, upd);
     e.currentTarget.classList.toggle('on', !!r.favourite);
     if (r.favourite) toast(`❤️ Loving <b>${esc(r.name)}</b>`);
   };
   $$('[data-star]', c).forEach((b) => (b.onclick = async () => {
     const n = Number(b.dataset.star);
-    const upd = await api(`/api/recipes/${r.id}`, { method: 'PUT', body: { rating: n === r.rating ? 0 : n } });
+    const upd = await api(`/api/recipes/${Number(r.id)}`, { method: 'PUT', body: { rating: n === r.rating ? 0 : n } });
     Object.assign(r, upd);
     $$('[data-star]', c).forEach((x) => x.classList.toggle('on', Number(x.dataset.star) <= r.rating));
   }));
-  $('.name', c).onclick = () => recipeModal(r, (upd) => (upd ? (Object.assign(r, upd), c.replaceWith(resultCard(r, refresh))) : c.remove()));
+  $('.name', c).onclick = () => recipeModal(r, (upd) => (upd ? (Object.assign(r, upd), c.replaceWith(resultCard(r, refresh, selection, onSelect))) : c.remove()));
   $('[data-add]', c).onclick = () => addToPlan(r);
   return c;
 }
@@ -755,6 +779,7 @@ async function viewLibrary(bookId) {
     const body = h(`<div class="stack">
       <a class="btn" href="/api/export" download>⬇️ Download a backup (JSON)</a>
       <label class="btn" style="position:relative;overflow:hidden">⬆️ Restore / import a backup<input type="file" accept="application/json" style="position:absolute;inset:0;opacity:0"></label>
+      <button class="btn" data-tags>🏷️ Manage tags</button>
       <button class="btn" data-demo>🧪 Load demo books</button>
       <button class="btn" data-covers>🖼️ Download missing covers</button>
       <button class="btn" data-refreshcovers>🌐 Refresh all covers from the internet</button>
@@ -766,6 +791,10 @@ async function viewLibrary(bookId) {
       m.close();
       toast(`Imported ${r.books} books and ${r.recipes} recipes`);
       route();
+    };
+    $('[data-tags]', body).onclick = () => {
+      m.close();
+      manageTags(() => refreshMeta());
     };
     $('[data-covers]', body).onclick = async (e) => {
       e.target.disabled = true;
@@ -849,12 +878,12 @@ async function bookModal(id) {
         <td class="small muted">${tagPills(r, 3)}</td><td class="act"><button class="icon-btn" title="Delete">✕</button></td></tr>`);
       const [n, p] = $$('input', tr);
       const saveRow = debounce(async () => {
-        const upd = await api(`/api/recipes/${r.id}`, { method: 'PUT', body: { name: n.value, page: p.value } });
+        const upd = await api(`/api/recipes/${Number(r.id)}`, { method: 'PUT', body: { name: n.value, page: p.value } });
         Object.assign(r, upd);
       }, 500);
       n.oninput = p.oninput = saveRow;
       $('button', tr).onclick = async () => {
-        await api(`/api/recipes/${r.id}`, { method: 'DELETE' });
+        await api(`/api/recipes/${Number(r.id)}`, { method: 'DELETE' });
         b.recipes = b.recipes.filter((x) => x.id !== r.id);
         tr.remove();
       };

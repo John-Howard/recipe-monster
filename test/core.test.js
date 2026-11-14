@@ -261,8 +261,23 @@ const COURSE_CASES = {
   Kombucha: 'other',
   'Blueberry chia pots': 'dessert',
   'Cream cheese spreads': 'other',
-  'Bird seed crackers': 'other',
-  'Trail mix': 'other',
+  'Bird seed crackers': 'snack',
+  'Trail mix': 'snack',
+  'Savoury trail mix': 'snack',
+  'Paprika and chilli trail mix': 'snack',
+  'Chinese five spice and honey trail mix': 'snack',
+  'Savoury Parmesan popcorn': 'snack',
+  'Flaxseed crackers': 'snack',
+  'Thai-flavoured seaweed crackers': 'snack',
+  'Pistachio and cranberry bliss balls': 'snack',
+  'Chocolate and walnut bites': 'snack',
+  'Chocolate raspberry nutty bites': 'snack',
+  'Super seeded flapjacks': 'snack',
+  'Walnuts with thyme, lemon and sea salt trail mix': 'snack',
+  'Walnuts with thyme, lemon and sea salt': 'snack',
+  'Roasted chickpeas': 'snack',
+  'Chocolate mousse': 'dessert',
+  'Beetroot and yoghurt dip': 'starter',
   'Aubergine, vegetable and paneer curry': 'main',
   'Spinach dahl': 'main',
   'Smoked mackerel pâté': 'starter',
@@ -316,6 +331,8 @@ test('mealFits uses course when present and falls back to tags otherwise', () =>
   assert.ok(!mealFits(r('side'), 'dinner'));
   assert.ok(mealFits(r('dessert'), 'dessert'));
   assert.ok(!mealFits(r('main'), 'dessert'));
+  assert.ok(mealFits(r('snack'), 'snack'));
+  assert.ok(!mealFits(r('other', ['snacks']), 'snack'));
   assert.ok(mealFits(r('breakfast'), 'breakfast'));
   assert.ok(mealFits(r('starter'), 'lunch'));
   assert.ok(mealFits(r('side', ['salad']), 'lunch'));
@@ -467,7 +484,7 @@ test('current plan versions increment and survive backup', () => {
   assert.deepEqual(s.getCurrentPlan(), { plan: null, version: 0 });
   assert.equal(s.saveCurrentPlan({ name: 'A' }), 1);
   assert.equal(s.saveCurrentPlan({ name: 'B' }), 2);
-  assert.deepEqual(s.getCurrentPlan(), { plan: { name: 'B' }, version: 2 });
+  assert.deepEqual(s.getCurrentPlan(), { plan: { name: 'B', recipes: {} }, version: 2 });
   const s2 = new Store(openDb(':memory:'));
   s2.importAll(s.exportAll());
   assert.equal(s2.getCurrentPlan().plan.name, 'B');
@@ -491,7 +508,7 @@ test('current plan route saves, validates and broadcasts', async () => {
     assert.equal((await put({ plan: 'x', client: 'a' })).status, 400);
     assert.equal((await put({ plan: [], client: 'a' })).status, 400);
     assert.deepEqual(await (await put({ plan: { name: 'Week' }, client: 'a' })).json(), { version: 1 });
-    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: { name: 'Week' }, version: 1 });
+    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: { name: 'Week', recipes: {} }, version: 1 });
     const { value } = await reader.read();
     assert.deepEqual(JSON.parse(new TextDecoder().decode(value).replace(/^data: /, '')), { type: 'current-plan', version: 1, client: 'a' });
   } finally {
@@ -545,6 +562,123 @@ test('current plan route and import reject invalid plans', async () => {
     assert.equal(s.getCurrentPlan().plan, null);
   } finally {
     server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('rules courses are re-guessed on startup; ai and user courses are left alone', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rm-')), 'snack.db');
+  const s = new Store(openDb(file));
+  const b = s.saveBook({ title: 'T' });
+  s.addRecipes(b, [{ name: 'Savoury trail mix' }, { name: 'Flaxseed crackers' }, { name: 'Popcorn' }]);
+  const [a, c, d] = s.getBook(b).recipes.map((r) => r.id);
+  s.db.prepare("UPDATE recipes SET course = 'other', course_source = 'rules' WHERE id = ?").run(a);
+  s.db.prepare("UPDATE recipes SET course = 'other', course_source = 'ai' WHERE id = ?").run(c);
+  s.db.prepare("UPDATE recipes SET course = 'other', course_source = 'user' WHERE id = ?").run(d);
+  const again = new Store(openDb(file));
+  assert.deepEqual([a, c, d].map((id) => again.getRecipe(id).course), ['snack', 'other', 'other']);
+});
+
+const tagStore = () => {
+  const s = new Store(openDb(':memory:'));
+  const b1 = s.saveBook({ title: 'Book One', tags: ['Vegan'] });
+  const b2 = s.saveBook({ title: 'Book Two' });
+  s.addRecipes(b1, [{ name: 'Alpha', tags: ['Quick'] }, { name: 'Beta', tags: ['quick', 'Zesty'] }]);
+  s.addRecipes(b2, [{ name: 'Gamma', tags: ['vegan'] }]);
+  const by = Object.fromEntries(s.allRecipes().map((r) => [r.name, r]));
+  return { s, by };
+};
+const found = (s, q) => s.search({ q }).map((r) => r.name).sort();
+
+test('listTags groups case-insensitively across recipes and books', () => {
+  const { s } = tagStore();
+  const t = Object.fromEntries(s.listTags().map((x) => [x.tag.toLowerCase(), x]));
+  assert.deepEqual([t.quick.recipes, t.quick.books], [2, 0]);
+  assert.deepEqual([t.vegan.recipes, t.vegan.books], [1, 1]);
+  assert.deepEqual(s.listTags().map((x) => x.tag.toLowerCase()), [...s.listTags().map((x) => x.tag.toLowerCase())].sort());
+});
+
+test('renameTag merges into an existing tag, keeps course, and reindexes', () => {
+  const { s, by } = tagStore();
+  assert.deepEqual(s.renameTag('QUICK', 'Zesty'), { recipes: 2, books: 0 });
+  assert.deepEqual(found(s, 'quick'), []);
+  assert.deepEqual(found(s, 'zesty'), ['Alpha', 'Beta']);
+  const beta = s.getRecipe(by.Beta.id);
+  assert.equal(beta.recipeTags.filter((t) => t.toLowerCase() === 'zesty').length, 1);
+  assert.equal(beta.course, by.Beta.course);
+  assert.equal(beta.course_source, by.Beta.course_source);
+  assert.deepEqual(s.renameTag('vegan', 'Plant based'), { recipes: 1, books: 1 });
+  assert.deepEqual(found(s, 'plant'), ['Alpha', 'Beta', 'Gamma']);
+  assert.throws(() => s.renameTag('Zesty', '  '));
+});
+
+test('renamed recipe tags become user tags so they survive auto regeneration', () => {
+  const { s, by } = tagStore();
+  s.db.prepare("UPDATE recipe_tags SET source = 'auto' WHERE recipe_id = ?").run(by.Alpha.id);
+  s.renameTag('quick', 'speedy');
+  assert.equal(s.db.prepare("SELECT source FROM recipe_tags WHERE recipe_id = ? AND tag = 'speedy'").get(by.Alpha.id).source, 'user');
+});
+
+test('deleteTag removes from recipes and books and reindexes', () => {
+  const { s } = tagStore();
+  assert.deepEqual(s.deleteTag('Vegan'), { recipes: 1, books: 1 });
+  assert.deepEqual(found(s, 'vegan'), []);
+  assert.ok(!s.listTags().some((t) => t.tag.toLowerCase() === 'vegan'));
+});
+
+test('bulkTagRecipes adds user tags and removes case-insensitively', () => {
+  const { s, by } = tagStore();
+  const ids = [by.Alpha.id, by.Gamma.id];
+  assert.equal(s.bulkTagRecipes(ids, { add: ['Party'], remove: ['QUICK'] }), 2);
+  assert.deepEqual(found(s, 'party'), ['Alpha', 'Gamma']);
+  assert.ok(!s.getRecipe(by.Alpha.id).recipeTags.some((t) => t.toLowerCase() === 'quick'));
+  assert.ok(s.getRecipe(by.Beta.id).recipeTags.includes('quick'));
+  assert.throws(() => s.bulkTagRecipes(['x'], { add: ['a'] }));
+  assert.throws(() => s.bulkTagRecipes(Array.from({ length: 1001 }, (_, i) => i + 1), { add: ['a'] }));
+});
+
+test('tag routes list, rename, delete, bulk-tag and validate', async () => {
+  const { createApp } = await import('../server/index.js');
+  const { s, by } = tagStore();
+  const server = http.createServer(createApp(s, {}));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const call = (method, p, body) => fetch(url + p, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then(async (r) => [r.status, await r.json().catch(() => null)]);
+  try {
+    assert.ok((await call('GET', '/api/tags'))[1].some((t) => t.tag === 'Zesty'));
+    assert.equal((await call('PUT', '/api/tags/Zesty', { name: ' ' }))[0], 400);
+    assert.deepEqual(await call('PUT', '/api/tags/Zesty', { name: 'Tangy' }), [200, { recipes: 1, books: 0 }]);
+    assert.deepEqual(await call('POST', '/api/recipes/tags', { ids: [by.Alpha.id, by.Beta.id], add: ['Fresh'], remove: ['Tangy'] }), [200, { updated: 2 }]);
+    assert.equal((await call('POST', '/api/recipes/tags', { ids: ['x'], add: ['a'] }))[0], 400);
+    assert.deepEqual(await call('DELETE', '/api/tags/Fresh'), [200, { recipes: 2, books: 0 }]);
+    assert.deepEqual(found(s, 'fresh'), []);
+  } finally {
+    server.close();
+  }
+});
+
+test('current plan never stores client recipes; GET rebuilds them from the database', async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const b = s.saveBook({ title: 'T' });
+  s.addRecipes(b, [{ name: 'Real dahl' }]);
+  const real = s.allRecipes()[0];
+  const server = http.createServer(createApp(s, {}));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}/api/current-plan`;
+  const put = (plan) => fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }) }).then((r) => r.status);
+  try {
+    const slots = [{ day: 0, meal: 'dinner', recipe_id: real.id }, { day: 1, meal: 'dinner', recipe_id: 9999 }];
+    const evil = { [real.id]: { id: real.id, name: '<img src=x onerror=alert(1)>' }, 9999: { id: 9999, name: 'ghost' } };
+    assert.equal(await put({ slots, recipes: evil }), 200);
+    assert.ok(!('recipes' in JSON.parse(s.db.prepare("SELECT value FROM settings WHERE key = 'current_plan'").get().value)));
+    const { plan } = await (await fetch(url)).json();
+    assert.deepEqual(Object.keys(plan.recipes), [String(real.id)]);
+    assert.equal(plan.recipes[real.id].name, 'Real dahl');
+    assert.equal(await put({ slots, recipes: [] }), 400);
+    s.importAll({ books: [], current_plan: { slots, recipes: evil } });
+    assert.ok(!('recipes' in JSON.parse(s.db.prepare("SELECT value FROM settings WHERE key = 'current_plan'").get().value)));
+  } finally {
     server.close();
   }
 });

@@ -183,15 +183,27 @@ export function createApp(store, { classify = classifyCourses } = {}) {
     const ids = (req.body.ids || []).map(Number).filter(Boolean);
     return ids.length ? store.recipesWhere(`r.id IN (${ids.join(',')})`) : [];
   }));
+  app.post('/api/recipes/tags', wrap((req) => {
+    const updated = store.bulkTagRecipes(req.body.ids, { add: req.body.add, remove: req.body.remove });
+    broadcast({ type: 'library-changed' });
+    return { updated };
+  }));
+  app.get('/api/tags', wrap(() => store.listTags()));
+  app.put('/api/tags/:tag', wrap((req) => {
+    const result = store.renameTag(req.params.tag, req.body.name);
+    broadcast({ type: 'library-changed' });
+    return result;
+  }));
+  app.delete('/api/tags/:tag', wrap((req) => {
+    const result = store.deleteTag(req.params.tag);
+    broadcast({ type: 'library-changed' });
+    return result;
+  }));
   app.post('/api/search', wrap((req) => store.search(req.body || {})));
   app.get('/api/facets', wrap(() => store.facets()));
 
   // ---- planning ----
-  const withRecipes = (slots) => {
-    const ids = [...new Set(slots.map((s) => s.recipe_id).filter(Boolean))];
-    const recipes = ids.length ? store.recipesWhere(`r.id IN (${ids.join(',')})`) : [];
-    return Object.fromEntries(recipes.map((r) => [r.id, r]));
-  };
+  const withRecipes = (slots) => store.recipesById(slots.map((s) => s.recipe_id));
   app.post('/api/plan/generate', wrap((req) => {
     const { theme = {}, slots = null } = req.body;
     const result = generatePlan(store.allRecipes(), theme, slots);
