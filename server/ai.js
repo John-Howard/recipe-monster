@@ -4,6 +4,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
+import { COURSES } from './tagger.js';
 
 const MODEL = process.env.RECIPE_MONSTER_MODEL || 'claude-opus-5-5';
 let client = null;
@@ -82,4 +83,48 @@ export async function extractBook(dataUrl) {
   });
   if (res.stop_reason === 'refusal') throw new Error('The model declined to read this image.');
   return res.parsed_output;
+}
+
+const CourseSchema = z.object({
+  courses: z.array(z.object({ id: z.number(), course: z.enum(COURSES) })),
+});
+
+const BATCH = 150;
+
+export function applyCourseResults(batch, results) {
+  const ids = new Set(batch.map((r) => r.id));
+  const seen = new Set();
+  return results.filter((r) => {
+    if (!ids.has(r.id) || seen.has(r.id) || !COURSES.includes(r.course)) return false;
+    seen.add(r.id);
+    return true;
+  }).map(({ id, course }) => ({ id, course }));
+}
+
+const coursePrompt = (book, batch) => `These recipe names come from the cookbook "${book.title}"${book.authors ? ` by ${book.authors}` : ''}.
+Give each recipe exactly one course:
+- starter: a small first course (soup, pate, dip, bruschetta)
+- main: a substantial savoury dish that can be the centre of an evening meal
+- dessert: a sweet pudding or treat
+- side: an accompaniment (vegetable side, plain salad)
+- breakfast
+- other: baking, sauces, drinks, snacks, spreads, condiments
+
+Recipes (id: name):
+${batch.map((r) => `${r.id}: ${r.name}`).join('\n')}`;
+
+export async function classifyCourses(recipes, book) {
+  const out = [];
+  for (let i = 0; i < recipes.length; i += BATCH) {
+    const batch = recipes.slice(i, i + BATCH);
+    const res = await getClient().messages.parse({
+      model: MODEL,
+      max_tokens: 16000,
+      output_config: { effort: 'low', format: zodOutputFormat(CourseSchema) },
+      messages: [{ role: 'user', content: coursePrompt(book, batch) }],
+    });
+    if (res.stop_reason === 'refusal') throw new Error('The model declined to classify these recipes.');
+    out.push(...applyCourseResults(batch, res.parsed_output?.courses ?? []));
+  }
+  return out;
 }

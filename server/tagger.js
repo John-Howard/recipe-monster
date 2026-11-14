@@ -35,8 +35,8 @@ const RULES = [
   ['bbq', /\bbbq|barbecue|grilled|kebab|skewer|souvlaki|satay/],
   // course
   ['breakfast', /\bbreakfast|porridge|granola|muesli|pancake|waffle|overnight oats|french toast|scrambled|poached egg|boiled egg|fried egg|benedict|shakshuka|smoothie|brunch|bircher|kedgeree|omelet|crumpet/],
-  ['dessert', /\bdessert|(?<!yorkshire )pudding|sponge\b|(?<!pan)cakes?\b|(lemon|treacle|chocolate|apple|bakewell|custard|fruit|berry|strawberry|raspberry|pear|plum|frangipane|pecan|jam|tarte) tart|tatin|crumble|cheesecake|brownie|mousse|ice[- ]?cream|sorbet|trifle|pavlova|meringue|souffl[eé]|panna cotta|tiramisu|fool\b|sundae|parfait|cr[eè]me br[uû]l[eé]e|custard|choc(olate)? pot|roulade|eton mess|sticky toffee|bread and butter pudding|clafoutis|semifreddo|baklava|jelly/],
-  ['baking', /\bbread|loaf|\bbuns?\b|scone|muffin|cookie|biscuit|flapjack|shortbread|brownie|cupcake|focaccia|sourdough|bagel|brioche|rolls?\b|(?<!pan)cakes?\b|tray ?bake bars|blondie/],
+  ['dessert', /\bdessert|(?<!yorkshire )pudding|sponge\b|(?<!pan|fish)cakes?\b|(lemon|treacle|chocolate|apple|bakewell|custard|fruit|berry|strawberry|raspberry|pear|plum|frangipane|pecan|jam|tarte) tart|tatin|crumble|cheesecake|brownie|mousse|ice[- ]?cream|sorbet|trifle|pavlova|meringue|souffl[eé]|panna cotta|tiramisu|fool\b|sundae|parfait|cr[eè]me br[uû]l[eé]e|custard|choc(olate)? pot|roulade|eton mess|sticky toffee|bread and butter pudding|clafoutis|semifreddo|baklava|jelly/],
+  ['baking', /\bbread|loaf|\bbuns?\b|scone|muffin|cookie|biscuit|flapjack|shortbread|brownie|cupcake|focaccia|sourdough|bagel|brioche|rolls?\b|(?<!pan|fish)cakes?\b|tray ?bake bars|blondie/],
   ['sides', /\bmash\b|mashed|chips\b|fries\b|wedges|gratin|dauphinoise|coleslaw|roast potatoes|side\b|greens\b|slaw|yorkshire pudding|stuffing|pilaf|pilau|rice salad|naan|chapati|roti/],
   ['sauces', /\bsauce|dressing|gravy|pesto|chutney|relish|salsa\b|mayonnaise|mayo\b|vinaigrette|dip\b|ketchup|jam\b|marmalade|pickle|raita|tzatziki|houmous|hummus|guacamole|stock\b/],
   ['drinks', /\bsmoothie|juice|lemonade|cocktail|mocktail|milkshake|\btea\b|coffee|latte|cordial|punch\b|spritz/],
@@ -73,10 +73,43 @@ export function autoTags(name) {
 // Course tags drive which meal slot a recipe is suitable for.
 const NON_MAIN = ['breakfast', 'dessert', 'baking', 'sides', 'sauces', 'drinks', 'snacks'];
 
+export const COURSES = ['starter', 'main', 'dessert', 'side', 'breakfast', 'other'];
+
+const PROTEINS = ['chicken', 'beef', 'lamb', 'pork', 'turkey', 'duck', 'fish', 'seafood', 'pulses', 'tofu'];
+const MAIN_TYPES = ['curry', 'pasta', 'rice', 'noodles', 'stir-fry', 'pie', 'stew', 'traybake', 'burger', 'pizza', 'tacos & wraps', 'bbq'];
+const NOT_PROTEIN = /green beans?|anchov\w*/g;
+const OTHER_NAME = /kombucha|kefir|crackers?\b|trail mix|granola bars?|spreads?\b|dressings?\b|tipple|cooler|cordial|lemonade|cocktail|mocktail|juice|butters?\s*$|cashew cream|drizzle\s*$|bouillon/;
+const DESSERT_FORM = /\bfool\b|granita|sorbet|frozen yog|ice cream/;
+const BAKE_NAME = /muffins?|scones?|biscuits?|cookies?|\bbread\b|loaf|\bbuns?\b/;;
+const STRONG_SWEET = /chocolate|\bfruit|(lime|lemon|orange|mango|coconut|rhubarb|banana|passion ?fruit).*\btart\b|ganache|frosting|icing|truffle|fudge|chia pots?|compote|\bbars\b|baked (pears?|apples?)|jelly/;
+const WEAK_SWEET = /caramel|toffee|sweet(?! potato)|honey|maple|berr(y|ies)|cream.*(fruit|apricot|peach|plum|cherr)|(fruit|apricot|peach|plum|cherr).*cream/;
+const STARTER_NAME = /\bsoup|broth|chowder|bisque|gazpacho|minestrone|p[aâ]t[eé](?![a-z])|terrine|bruschetta|crostini|canap|prawn cocktail|carpaccio|\bdips?\b/;
+const MAIN_NAME = /\bbake\b|casserole|risotto|dahl|bolognese|chilli|fillets?\b|nut roast|parmigiana|\bmac\b.*cheese|frittata|quiche|baked eggs/;
+
+export function guessCourse(name, tags = []) {
+  const n = String(name || '').toLowerCase();
+  const t = new Set(tags.map((x) => x.toLowerCase()));
+  const fromName = new Set(autoTags(n.replace(NOT_PROTEIN, '')));
+  const isMain = PROTEINS.some((p) => t.has(p) && fromName.has(p)) || MAIN_TYPES.some((m) => t.has(m)) || MAIN_NAME.test(n);
+  if (DESSERT_FORM.test(n)) return 'dessert';
+  if (OTHER_NAME.test(n)) return 'other';
+  if (t.has('dessert') || STRONG_SWEET.test(n)) return 'dessert';
+  if (STARTER_NAME.test(n)) return 'starter';
+  if (BAKE_NAME.test(n)) return 'other';
+  if (t.has('breakfast')) return 'breakfast';
+  if (isMain) return 'main';
+  if (WEAK_SWEET.test(n)) return 'dessert';
+  if (['baking', 'sauces', 'drinks', 'snacks'].some((c) => t.has(c))) return 'other';
+  return 'side';
+}
+
 export function mealFits(recipe, meal) {
   const t = new Set(recipe.tags.map((x) => x.toLowerCase()));
+  if (recipe.course) return courseFits(recipe.course, t, meal);
   const isMain = t.has('main') || !NON_MAIN.some((c) => t.has(c));
   switch (meal) {
+    case 'starter':
+      return t.has('soup') || /\bsoup|p[aâ]t[eé](?![a-z])|\bdips?\b|terrine|bruschetta|crostini/i.test(recipe.name);
     case 'breakfast':
       return t.has('breakfast');
     case 'lunch':
@@ -88,6 +121,23 @@ export function mealFits(recipe, meal) {
     case 'dinner':
     default:
       return isMain;
+  }
+}
+
+function courseFits(course, t, meal) {
+  switch (meal) {
+    case 'starter':
+      return course === 'starter';
+    case 'breakfast':
+      return course === 'breakfast' || t.has('breakfast');
+    case 'lunch':
+      return course === 'main' || course === 'starter' || t.has('light lunch') || t.has('soup') || t.has('salad');
+    case 'dessert':
+      return course === 'dessert';
+    case 'snack':
+      return course === 'other';
+    default:
+      return course === 'main';
   }
 }
 

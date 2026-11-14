@@ -11,7 +11,7 @@ import { parseIndexText } from './indexParser.js';
 import { generatePlan, rerollSlot } from './planner.js';
 import { lookupIsbn } from './isbn.js';
 import { findCover, isLocalCover, removeLocalCover } from './covers.js';
-import { aiEnabled, extractIndex, extractBook } from './ai.js';
+import { aiEnabled, extractIndex, extractBook, classifyCourses } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -30,7 +30,7 @@ export function isCrossSite(headers) {
   }
 }
 
-export function createApp(store) {
+export function createApp(store, { classify = classifyCourses } = {}) {
   const app = express();
   app.use('/api', (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || !isCrossSite(req.headers)) return next();
@@ -132,7 +132,34 @@ export function createApp(store) {
     const result = store.addRecipes(id(req), entries);
     const book = store.getBook(id(req));
     broadcast({ type: 'recipes-added', book: { id: book.id, title: book.title }, added: result.added, from: req.body.from || 'scan' });
+    if (aiEnabled() && result.ids.length) {
+      classifyBook(book.id, result.ids)
+        .then((n) => n && broadcast({ type: 'library-changed' }))
+        .catch((e) => console.error('course classification failed:', e.message));
+    }
     return { ...result, total: book.recipes.length };
+  }));
+  const classifyBook = async (bookId, only = null) => {
+    const book = store.getBook(bookId);
+    const todo = book.recipes.filter((r) => r.course_source !== 'user' && (!only || only.includes(r.id))).map((r) => ({ id: r.id, name: r.name }));
+    if (!todo.length) return 0;
+    return store.setCourses(await classify(todo, book), 'ai');
+  };
+  const requireAi = () => {
+    if (!aiEnabled()) throw new Error('AI is not set up on the server (set ANTHROPIC_API_KEY).');
+  };
+  app.post('/api/books/:id/courses', wrap(async (req) => {
+    requireAi();
+    const classified = await classifyBook(id(req));
+    if (classified) broadcast({ type: 'library-changed' });
+    return { classified };
+  }));
+  app.post('/api/courses/recheck', wrap(async () => {
+    requireAi();
+    let classified = 0;
+    for (const b of store.listBooks()) classified += await classifyBook(b.id);
+    if (classified) broadcast({ type: 'library-changed' });
+    return { classified };
   }));
   app.post('/api/demo', wrap(async () => {
     if (store.stats().demo) throw new Error('The demo books are already on the shelf.');

@@ -48,6 +48,10 @@ Tips: good light, one page per photo, book held flat, page filling the frame.
 - With on-device OCR, a page that reads as gibberish (few recipes or low confidence) is automatically retried at 90°, 270° and 180°, and the best result is kept.
 - On the review screen recipes are grouped by page, with **🔁 Re-read** and **🗑️ Delete page** on each group. Recipes that also appear on an earlier page are shown struck through and only saved once.
 
+## Courses
+
+Every recipe has one course (starter, main, dessert, side, breakfast or other), kept separate from its tags. It is first guessed from the name by simple rules, and the planner uses it so dinners are real mains and puddings are real desserts. With `ANTHROPIC_API_KEY` set, new recipes are also classified by Claude in the background, and **🍽️ Re-check courses with AI** in the library tools redoes the whole shelf. Changing a recipe's course yourself locks it in: neither the rules nor the AI will overwrite it.
+
 ## Themes
 
 Themes are built from chips:
@@ -59,6 +63,8 @@ Themes are built from chips:
 Chips of the same kind mean *either* (Fast 800 **or** Slimming World); different kinds mean *both* (Fast 800 **and** by Dr Michael Mosley). Click a chip to flip it to **not** (e.g. *not fish*). Save combinations you like as theme tiles.
 
 The planner fits recipes to meals (breakfast slots only get breakfast recipes, lunches lean towards soups and salads), avoids repeats and back-to-back main ingredients or cuisines, prefers favourites and higher ratings, and skips what you've cooked in the last fortnight (tick ✅ on a card when you cook it). **Fewer books off the shelf** clusters the week into fewer books.
+
+Evenings are built around a main (the dinner slot). Switch on **🥗 Starters at weekends** and/or **🍮 Puddings at weekends** and Saturday and Sunday get a starter and a pudding that complement the main (not the same main ingredient or dish type, and a light pudding after a heavy main). On weekdays each day has a faint **＋ starter** / **＋ pudding** button if you want one; ✕ on a starter or pudding removes it again. Older plans with a pudding meal still open, with weekend puddings switched on.
 
 ## Running in Docker (OrbStack) with HTTPS
 

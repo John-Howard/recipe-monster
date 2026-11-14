@@ -2,7 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { autoTags } from './tagger.js';
+import { autoTags, guessCourse, COURSES } from './tagger.js';
 
 const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
 
@@ -68,6 +68,10 @@ export function openDb(file = path.join(DATA_DIR, 'recipe-monster.db')) {
       theme_json TEXT NOT NULL
     );
   `);
+  const cols = db.prepare('PRAGMA table_info(recipes)').all().map((c) => c.name);
+  for (const col of ['course', 'course_source']) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE recipes ADD COLUMN ${col} TEXT DEFAULT ''`);
+  }
   return db;
 }
 
@@ -84,6 +88,28 @@ export function splitAuthors(s) {
 export class Store {
   constructor(db) {
     this.db = db;
+    this.backfillCourses();
+  }
+
+  backfillCourses() {
+    const rows = this.recipesWhere("COALESCE(r.course, '') = ''");
+    if (!rows.length) return;
+    this.tx(() => {
+      for (const r of rows) this.setRulesCourse(r);
+    });
+  }
+
+  setRulesCourse(r) {
+    this.db.prepare("UPDATE recipes SET course = ?, course_source = 'rules' WHERE id = ?").run(guessCourse(r.name, r.tags), r.id);
+  }
+
+  setCourses(list, source) {
+    const upd = this.db.prepare("UPDATE recipes SET course = ?, course_source = ? WHERE id = ? AND COALESCE(course_source, '') != 'user'");
+    return this.tx(() => {
+      let n = 0;
+      for (const { id, course } of list) if (COURSES.includes(course)) n += Number(upd.run(course, source, id).changes);
+      return n;
+    });
   }
 
   tx(fn) {
@@ -192,6 +218,7 @@ export class Store {
           .map((r) => r.k)
       );
       const ins = this.db.prepare('INSERT INTO recipes (book_id, name, page) VALUES (?, ?, ?)');
+      const setCourse = this.db.prepare('UPDATE recipes SET course = ?, course_source = ? WHERE id = ?');
       const added = [];
       let skipped = 0;
       for (const e of entries) {
@@ -206,10 +233,12 @@ export class Store {
         existing.add(key);
         const id = Number(ins.run(bookId, name, page).lastInsertRowid);
         this.setRecipeTags(id, uniq([...(e.tags || []), ...autoTags(name)]), 'auto');
+        if (COURSES.includes(e.course)) setCourse.run(e.course, e.course_source || 'user', id);
+        else this.setRulesCourse(this.getRecipe(id));
         added.push(id);
       }
       for (const id of added) this.reindexRecipe(id);
-      return { added: added.length, skipped };
+      return { added: added.length, skipped, ids: added };
     });
   }
 
@@ -233,6 +262,11 @@ export class Store {
       } else if (data.name !== undefined && next.name !== r.name) {
         this.db.prepare("DELETE FROM recipe_tags WHERE recipe_id = ? AND source = 'auto'").run(id);
         this.setRecipeTags(id, autoTags(next.name), 'auto');
+      }
+      if (COURSES.includes(data.course)) {
+        this.db.prepare("UPDATE recipes SET course = ?, course_source = 'user' WHERE id = ?").run(data.course, id);
+      } else if (r.course_source === 'rules' && (Array.isArray(data.tags) || next.name !== r.name)) {
+        this.setRulesCourse(this.getRecipe(id));
       }
       this.reindexRecipe(id);
     });
@@ -424,7 +458,7 @@ export class Store {
         ...b,
         recipes: full.recipes.map((r) => ({
           name: r.name, page: r.page, notes: r.notes, rating: r.rating, favourite: r.favourite,
-          times_cooked: r.times_cooked, last_cooked: r.last_cooked, tags: r.recipeTags,
+          times_cooked: r.times_cooked, last_cooked: r.last_cooked, tags: r.recipeTags, course: r.course, course_source: r.course_source,
         })),
       };
     });
@@ -436,7 +470,7 @@ export class Store {
     for (const b of data.books || []) {
       const id = this.saveBook({ ...b, tags: b.tags || [] });
       books++;
-      const res = this.addRecipes(id, (b.recipes || []).map((r) => ({ name: r.name, page: r.page, tags: r.tags })));
+      const res = this.addRecipes(id, (b.recipes || []).map((r) => ({ name: r.name, page: r.page, tags: r.tags, course: r.course, course_source: r.course_source })));
       recipes += res.added;
       for (const r of b.recipes || []) {
         if (r.rating || r.favourite || r.notes || r.times_cooked) {

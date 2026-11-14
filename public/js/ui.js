@@ -390,12 +390,13 @@ export function chipInput({ facets, chips = [], placeholder = 'Add a diet, autho
   };
 }
 
-export const MEAL_EMOJI = { breakfast: '🍳', lunch: '🥪', dinner: '🍲', dessert: '🍰' };
+export const MEAL_EMOJI = { breakfast: '🍳', lunch: '🥪', starter: '🥗', dinner: '🍲', dessert: '🍰' };
 export const DIET_TAGS = new Set(['vegetarian', 'vegan', 'gluten-free', 'dairy-free']);
 
-export function tagPills(r, max = 3) {
+export function tagPills(r, max = 3, showCourse = true) {
   const shown = [...new Map([...r.bookTags.slice(0, 1), ...r.recipeTags].map((t) => [t.toLowerCase(), t])).values()].slice(0, max);
-  return shown.map((t) => `<span class="pill ${DIET_TAGS.has(t.toLowerCase()) ? 'diet' : ''}">${esc(t)}</span>`).join(' ');
+  const course = showCourse && r.course ? `<span class="pill">${esc(r.course)}</span> ` : '';
+  return course + shown.map((t) => `<span class="pill ${DIET_TAGS.has(t.toLowerCase()) ? 'diet' : ''}">${esc(t)}</span>`).join(' ');
 }
 
 export function initThemeToggle(btn) {
