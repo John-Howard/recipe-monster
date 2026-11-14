@@ -69,6 +69,12 @@ PUBLIC_URL=https://<lan-ip>:3443 docker compose up -d --build
 
 Open https://localhost:3443 on the Mac. Your library lives in `./data`; `ANTHROPIC_API_KEY` and `RECIPE_MONSTER_MODEL` are read from the environment or a `.env` file.
 
+To pull the API key from 1Password instead (nothing secret is written to disk; `.env.1password` only holds an `op://` reference):
+
+```
+PUBLIC_URL=https://<lan-ip>:3443 op run --env-file=.env.1password -- docker compose up -d --build
+```
+
 On the phone, AirDrop `certs/rootCA.pem` to it and install the profile. On iOS, then enable full trust in Settings → General → About → Certificate Trust Settings. On Android: Settings → Security → Install certificate → CA certificate. Then open `https://<lan-ip>:3443/scan.html`.
 
 If the Mac's LAN IP changes, re-run `scripts/make-cert.sh` and update `PUBLIC_URL`.
