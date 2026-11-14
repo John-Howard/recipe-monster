@@ -412,8 +412,55 @@ test('course routes need AI and classify non-user recipes', async () => {
     process.env.ANTHROPIC_API_KEY = 'x';
     assert.deepEqual(await post(`/api/books/${b}/courses`), [200, { classified: 1 }]);
     assert.deepEqual(seen, ['Kombucha']);
-    assert.deepEqual(await post('/api/courses/recheck'), [200, { classified: 1 }]);
     assert.equal(s.getRecipe(mine.id).course, 'side');
+  } finally {
+    if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = saved;
+    server.close();
+  }
+});
+
+test('course recheck runs as one job with progress', { timeout: 5000 }, async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const a = s.saveBook({ title: 'Alpha' });
+  const c = s.saveBook({ title: 'Beta' });
+  s.addRecipes(a, [{ name: 'One' }, { name: 'Two' }, { name: 'Mine' }]);
+  s.addRecipes(c, [{ name: 'Three' }]);
+  s.updateRecipe(s.allRecipes().find((r) => r.name === 'Mine').id, { course: 'side' });
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const classify = async (recipes, book, { onBatch } = {}) => {
+    await gate;
+    onBatch?.(recipes.length);
+    return recipes.map((r) => ({ id: r.id, course: 'starter' }));
+  };
+  const server = http.createServer(createApp(s, { classify }));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const post = () => fetch(`${url}/api/courses/recheck`, { method: 'POST' }).then(async (r) => [r.status, await r.json()]);
+  const poll = (job) => fetch(`${url}/api/jobs/${job}`).then((r) => r.json());
+  const saved = process.env.ANTHROPIC_API_KEY;
+  try {
+    process.env.ANTHROPIC_API_KEY = 'x';
+    const [status, { job }] = await post();
+    assert.equal(status, 200);
+    assert.ok(job);
+    assert.deepEqual((await post())[1], { job });
+    await new Promise((r) => setTimeout(r, 50));
+    const mid = await poll(job);
+    assert.equal(mid.status, 'working');
+    assert.deepEqual(mid.progress, { done: 0, total: 3, book: 'Alpha' });
+    release();
+    let j;
+    do {
+      await new Promise((r) => setTimeout(r, 20));
+      j = await poll(job);
+    } while (j.status === 'working');
+    assert.equal(j.status, 'done');
+    assert.deepEqual(j.result, { classified: 3 });
+    assert.deepEqual(j.progress, { done: 3, total: 3, book: 'Beta' });
+    assert.notEqual((await post())[1].job, job);
   } finally {
     if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = saved;
