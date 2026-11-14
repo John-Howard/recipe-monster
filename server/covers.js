@@ -39,6 +39,22 @@ async function fetchFollowing(target, fetch) {
   return null;
 }
 
+async function readCapped(res) {
+  if (Number(res.headers.get('content-length')) > MAX_BYTES) return null;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    total += r.value.length;
+    if (total > MAX_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(r.value);
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function downloadCover(url, dir, { fetch = globalThis.fetch } = {}) {
   const target = secureUrl(url);
   if (!target) return null;
@@ -47,8 +63,8 @@ export async function downloadCover(url, dir, { fetch = globalThis.fetch } = {})
     if (!res?.ok) return null;
     const ext = EXTENSIONS[(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()];
     if (!ext) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < MIN_BYTES || buf.length > MAX_BYTES) return null;
+    const buf = await readCapped(res);
+    if (!buf || buf.length < MIN_BYTES) return null;
     const name = `${crypto.randomUUID()}.${ext}`;
     fs.writeFileSync(path.join(dir, name), buf);
     return `/covers/${name}`;

@@ -108,11 +108,24 @@ test('lanUrls scans interfaces with http, or https when TLS is on', () => {
   assert.equal(tls.length, plain.length);
 });
 
-const imgRes = (url, { type = 'image/jpeg', size = 2048, ok = true } = {}) => ({
+const streamOf = (chunks, spy = {}) => {
+  let i = 0;
+  return new ReadableStream({
+    pull(c) {
+      if (i >= chunks.length) return c.close();
+      spy.pulled = ++i;
+      c.enqueue(chunks[i - 1]);
+    },
+    cancel() {
+      spy.cancelled = true;
+    },
+  });
+};
+const imgRes = (url, { type = 'image/jpeg', size = 2048, ok = true, length, spy } = {}) => ({
   ok,
   url,
-  headers: { get: () => type },
-  arrayBuffer: async () => new ArrayBuffer(size),
+  headers: { get: (h) => (h === 'content-length' ? length ?? null : type) },
+  body: streamOf(size > 0 ? [new Uint8Array(size)] : [], spy),
 });
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'covers-'));
 
@@ -179,4 +192,19 @@ test('downloadCover validates redirect targets before requesting them', async ()
 
   const loop = async () => redirect('https://archive.org/again');
   assert.equal(await downloadCover('https://archive.org/a', dir, { fetch: loop }), null);
+});
+
+test('downloadCover caps size by Content-Length and while streaming', async () => {
+  const dir = tmpDir();
+  const spy = {};
+  let declaredRes;
+  const declared = async (u) => (declaredRes = imgRes(u, { length: String(6 * 1024 * 1024), spy }));
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: declared }), null);
+  assert.equal(declaredRes.body.locked, false);
+
+  const streamed = async (u) => ({ ...imgRes(u), body: streamOf(Array.from({ length: 10 }, () => new Uint8Array(1024 * 1024)), spy) });
+  assert.equal(await downloadCover('https://covers.openlibrary.org/a', dir, { fetch: streamed }), null);
+  assert.equal(spy.cancelled, true);
+  assert.ok(spy.pulled < 10);
+  assert.equal(fs.readdirSync(dir).length, 0);
 });
