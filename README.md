@@ -66,6 +66,8 @@ The planner fits recipes to meals (breakfast slots only get breakfast recipes, l
 
 Evenings are built around a main (the dinner slot). Switch on **🥗 Starters at weekends** and/or **🍮 Puddings at weekends** and Saturday and Sunday get a starter and a pudding that complement the main (not the same main ingredient or dish type, and a light pudding after a heavy main). On weekdays each day has a faint **＋ starter** / **＋ pudding** button if you want one; ✕ on a starter or pudding removes it again. Older plans with a pudding meal still open, with weekend puddings switched on.
 
+The plan you are working on is shared between devices: change it on the desktop and it appears on your phone (and vice versa).
+
 ## Running in Docker (OrbStack) with HTTPS
 
 Phone cameras only work on a secure origin, so the container serves HTTPS with a local [mkcert](https://github.com/FiloSottile/mkcert) certificate.

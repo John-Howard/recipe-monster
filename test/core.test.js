@@ -461,3 +461,90 @@ test('mealFits handles starters', () => {
   assert.ok(mealFits({ name: 'Smoked mackerel pate', tags: [] }, 'starter'));
   assert.ok(!mealFits({ name: 'Chicken pie', tags: ['pie'] }, 'starter'));
 });
+
+test('current plan versions increment and survive backup', () => {
+  const s = new Store(openDb(':memory:'));
+  assert.deepEqual(s.getCurrentPlan(), { plan: null, version: 0 });
+  assert.equal(s.saveCurrentPlan({ name: 'A' }), 1);
+  assert.equal(s.saveCurrentPlan({ name: 'B' }), 2);
+  assert.deepEqual(s.getCurrentPlan(), { plan: { name: 'B' }, version: 2 });
+  const s2 = new Store(openDb(':memory:'));
+  s2.importAll(s.exportAll());
+  assert.equal(s2.getCurrentPlan().plan.name, 'B');
+  s2.importAll({ books: [] });
+  assert.equal(s2.getCurrentPlan().plan.name, 'B');
+});
+
+test('current plan route saves, validates and broadcasts', async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const server = http.createServer(createApp(s));
+  await new Promise((r) => server.listen(0, r));
+  const url = `http://localhost:${server.address().port}`;
+  const put = (body) => fetch(`${url}/api/current-plan`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const ac = new AbortController();
+  try {
+    const events = await fetch(`${url}/api/events`, { signal: ac.signal });
+    const reader = events.body.getReader();
+    await reader.read();
+    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: null, version: 0 });
+    assert.equal((await put({ plan: 'x', client: 'a' })).status, 400);
+    assert.equal((await put({ plan: [], client: 'a' })).status, 400);
+    assert.deepEqual(await (await put({ plan: { name: 'Week' }, client: 'a' })).json(), { version: 1 });
+    assert.deepEqual(await (await fetch(`${url}/api/current-plan`)).json(), { plan: { name: 'Week' }, version: 1 });
+    const { value } = await reader.read();
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(value).replace(/^data: /, '')), { type: 'current-plan', version: 1, client: 'a' });
+  } finally {
+    ac.abort();
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('validatePlan accepts real plans and rejects malformed ones', async () => {
+  const { validatePlan } = await import('../server/validatePlan.js');
+  const good = {
+    name: 'Week',
+    theme: { start: '2026-11-09', days: 7, meals: ['dinner'], starters: 'off', puddings: 'weekends', chips: [{ type: 'tag', value: 'soup' }] },
+    slots: [{ day: 0, meal: 'dinner', recipe_id: 3, locked: false, cooked: false }, { day: 13, meal: 'dessert', recipe_id: null }],
+    recipes: {},
+  };
+  assert.equal(validatePlan(good), null);
+  assert.equal(validatePlan({}), null);
+  const bad = (patch) => validatePlan({ ...good, theme: { ...good.theme, ...patch.theme }, ...(patch.slots && { slots: patch.slots }) });
+  for (const p of [null, 'x', []]) assert.match(validatePlan(p), /object/);
+  assert.match(bad({ theme: { start: '"><x>' } }), /start/);
+  assert.match(bad({ theme: { days: 15 } }), /days/);
+  assert.match(bad({ theme: { days: 1.5 } }), /days/);
+  assert.match(bad({ theme: { meals: ['brunch'] } }), /meals/);
+  assert.match(bad({ theme: { starters: 'always' } }), /starters/);
+  assert.match(bad({ theme: { puddings: 1 } }), /puddings/);
+  assert.match(bad({ theme: { chips: [{ type: 'x"y', value: 'a' }] } }), /chip/);
+  assert.match(bad({ theme: { chips: [{ type: 'tag', value: 'a'.repeat(201) }] } }), /chip/);
+  assert.match(bad({ theme: { chips: 'no' } }), /chips/);
+  assert.match(bad({ slots: [{ day: 14, meal: 'dinner', recipe_id: 1 }] }), /slot/);
+  assert.match(bad({ slots: [{ day: 0, meal: 'x', recipe_id: 1 }] }), /slot/);
+  assert.match(bad({ slots: [{ day: 0, meal: 'dinner', recipe_id: '1' }] }), /slot/);
+  assert.match(bad({ slots: [{ day: 0, meal: 'dinner', recipe_id: 1, locked: 'yes' }] }), /slot/);
+  assert.match(bad({ slots: Array(201).fill({ day: 0, meal: 'dinner', recipe_id: 1 }) }), /slots/);
+  assert.match(validatePlan({ ...good, name: 'a'.repeat(600000) }), /large/);
+});
+
+test('current plan route and import reject invalid plans', async () => {
+  const { createApp } = await import('../server/index.js');
+  const s = new Store(openDb(':memory:'));
+  const server = http.createServer(createApp(s));
+  await new Promise((r) => server.listen(0, r));
+  try {
+    const res = await fetch(`http://localhost:${server.address().port}/api/current-plan`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: { theme: { start: '"><x>' } } }),
+    });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /start/);
+    s.importAll({ books: [], current_plan: { theme: { days: 99 } } });
+    assert.equal(s.getCurrentPlan().plan, null);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});

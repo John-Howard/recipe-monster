@@ -1,6 +1,6 @@
 import {
   api, $, $$, h, esc, debounce, toast, modal, confirmBox, confetti, chomp, monsterSvg, quip,
-  chipInput, chipLabel, bookColour, tagPills, MEAL_EMOJI, initThemeToggle, loadScript,
+  chipInput, chipLabel, chipClass, bookColour, tagPills, MEAL_EMOJI, initThemeToggle, loadScript,
 } from './ui.js';
 import { mountScanner } from './scanner.js';
 
@@ -42,8 +42,61 @@ const blankPlan = () => ({
   recipes: {},
   warnings: [],
 });
-let plan = store.get() || blankPlan();
-const savePlanLocal = () => store.set(plan);
+const CLIENT_ID = Math.random().toString(36).slice(2);
+function cleanPlan(p) {
+  if (!p || typeof p !== 'object' || !Array.isArray(p.slots) || !p.theme?.meals) return blankPlan();
+  p.slots = p.slots.filter((s) => s && Number.isInteger(s.day) && s.day >= 0 && MEALS.includes(s.meal));
+  return p;
+}
+let plan = cleanPlan(store.get());
+let planVersion = 0;
+let pushTimer = null;
+let syncedJson = '';
+
+async function pushPlan() {
+  pushTimer = null;
+  const json = JSON.stringify(plan);
+  if (json === syncedJson) return;
+  try {
+    syncedJson = json;
+    planVersion = (await api('/api/current-plan', { method: 'PUT', body: { plan, client: CLIENT_ID } })).version;
+  } catch {}
+}
+function savePlanLocal() {
+  store.set(plan);
+  if (JSON.stringify(plan) === syncedJson) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushPlan, 400);
+}
+async function loadSharedPlan() {
+  try {
+    const remote = await api('/api/current-plan', { retries: 0 });
+    planVersion = remote.version;
+    if (remote.plan) {
+      plan = cleanPlan(remote.plan);
+      syncedJson = JSON.stringify(plan);
+      store.set(plan);
+    } else if (store.get()) await pushPlan();
+  } catch {}
+}
+async function applyRemotePlan(version) {
+  if (pushTimer || version <= planVersion) return;
+  try {
+    const remote = await api('/api/current-plan', { retries: 0 });
+    if (pushTimer || !remote.plan || remote.version <= planVersion) return;
+    planVersion = remote.version;
+    const json = JSON.stringify(remote.plan);
+    if (json === JSON.stringify(plan)) {
+      syncedJson = json;
+      return;
+    }
+    plan = cleanPlan(remote.plan);
+    syncedJson = json;
+    store.set(plan);
+    const name = location.hash.replace(/^#\/?/, '').split('/')[0] || 'plan';
+    if (name === 'plan' && !document.querySelector('.modal-back')) route();
+  } catch {}
+}
 
 function normaliseTheme(t) {
   if (t.meals.includes('dessert')) {
@@ -119,7 +172,7 @@ async function viewPlan() {
         <div><b>Meals</b></div>
         <div class="row" style="margin:.35rem 0 .7rem" data-meals></div>
         <div class="row" style="margin-bottom:.6rem">
-          <label class="field" style="flex:1"><span>Week starting</span><input type="date" data-start value="${plan.theme.start || nextMonday()}"></label>
+          <label class="field" style="flex:1"><span>Week starting</span><input type="date" data-start value="${esc(plan.theme.start || nextMonday())}"></label>
           <label class="field" style="width:96px"><span>Days</span><select data-days>${[3, 4, 5, 6, 7, 10, 14].map((d) => `<option ${d === plan.theme.days ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
         </div>
         <div class="opts">
@@ -176,16 +229,19 @@ async function viewPlan() {
   $('[data-chips]', el).append(chipper.el);
 
   let sampleNames = [];
-  const onThemeChange = debounce(async () => {
-    savePlanLocal();
+  const refreshPreview = async () => {
     const r = await api('/api/plan/preview', { method: 'POST', body: { chips: plan.theme.chips } });
     sampleNames = r.sample;
     $('[data-n]', el).textContent = r.count;
     $('[data-nlabel]', el).textContent = `recipe${r.count === 1 ? '' : 's'} match${r.count === 1 ? 'es' : ''} from ${r.books} book${r.books === 1 ? '' : 's'}`;
     $('[data-ticker]', el).textContent = r.sample.join('  ·  ');
     $('[data-n]', el).animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 250 });
+  };
+  const onThemeChange = debounce(() => {
+    savePlanLocal();
+    refreshPreview();
   }, 150);
-  onThemeChange();
+  refreshPreview();
 
   const mealsEl = $('[data-meals]', el);
   const drawMeals = () => {
@@ -211,7 +267,7 @@ async function viewPlan() {
   $('[data-savetheme]', el).onclick = () => {
     if (!plan.theme.chips.length) return toast('Add some theme chips first!', { error: true });
     const form = h(`<form class="stack"><label class="field"><span>Name</span><input name="name" required value="${esc(plan.theme.chips.map((c) => c.exclude ? 'no ' + chipLabel(c) : chipLabel(c)).join(' + ').replace(/<[^>]+>/g, ''))}"></label>
-      <label class="field"><span>Emoji</span><input name="emoji" value="${emojiFor(plan.theme.chips.map((c) => c.value).join(' '))}" maxlength="4" style="width:80px"></label>
+      <label class="field"><span>Emoji</span><input name="emoji" value="${esc(emojiFor(plan.theme.chips.map((c) => c.value).join(' ')))}" maxlength="4" style="width:80px"></label>
       <button class="btn go">Save theme</button></form>`);
     const m = modal('⭐ Save theme', form);
     form.onsubmit = async (e) => {
@@ -295,7 +351,7 @@ async function viewPlan() {
   function appendSlot(grid, day, meal, spin) {
     const idx = plan.slots.findIndex((s) => s.day === day && s.meal === meal);
     if (idx < 0 && ADDABLE.includes(meal)) {
-      const e = h(`<button class="addcourse" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}">＋ ${MEAL_LABEL[meal].toLowerCase()}</button>`);
+      const e = h(`<button class="addcourse" data-meal="${esc(meal)}" data-label="${MEAL_LABEL[meal]}">＋ ${MEAL_LABEL[meal].toLowerCase()}</button>`);
       e.onclick = () => {
         plan.slots.push({ day, meal, recipe_id: null, locked: false });
         reroll(plan.slots.length - 1);
@@ -304,7 +360,7 @@ async function viewPlan() {
       return;
     }
     if (idx < 0) {
-      const e = h(`<div class="slot empty" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}">＋</div>`);
+      const e = h(`<div class="slot empty" data-meal="${esc(meal)}" data-label="${MEAL_LABEL[meal]}">＋</div>`);
       e.onclick = () => {
         plan.slots.push({ day, meal, recipe_id: null, locked: false });
         savePlanLocal();
@@ -316,13 +372,13 @@ async function viewPlan() {
     const s = plan.slots[idx];
     const r = plan.recipes[s.recipe_id];
     if (!r) {
-      const e = h(`<div class="slot empty ${ADDABLE.includes(meal) ? 'compact' : ''}" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}" tabindex="0">＋ add ${MEAL_LABEL[meal].toLowerCase()}</div>`);
+      const e = h(`<div class="slot empty ${ADDABLE.includes(meal) ? 'compact' : ''}" data-meal="${esc(meal)}" data-label="${MEAL_LABEL[meal]}" tabindex="0">＋ add ${MEAL_LABEL[meal].toLowerCase()}</div>`);
       e.onclick = () => pickFor(idx);
       wireDrop(e, idx);
       grid.append(e);
       return;
     }
-    const el = h(`<div class="slot ${ADDABLE.includes(meal) ? 'compact' : ''} ${s.locked ? 'locked' : ''} ${s.cooked ? 'cooked' : ''}" draggable="true" data-meal="${meal}" data-label="${MEAL_LABEL[meal]}" style="--book:${bookColour(r)}">
+    const el = h(`<div class="slot ${ADDABLE.includes(meal) ? 'compact' : ''} ${s.locked ? 'locked' : ''} ${s.cooked ? 'cooked' : ''}" draggable="true" data-meal="${esc(meal)}" data-label="${MEAL_LABEL[meal]}" style="--book:${bookColour(r)}">
       <div class="band"></div>
       ${s.locked ? '<span class="lockflag" title="Locked">🔒</span>' : ''}
       <div class="inner">
@@ -877,15 +933,16 @@ async function viewPlans() {
     const filled = full.slots.filter((s) => full.recipes[s.recipe_id]);
     const c = h(`<div class="card plancard"><h3>${esc(p.name)}</h3><div class="small muted">${p.week_start ? `Week of ${esc(p.week_start)} · ` : ''}${filled.length} meals · ${new Set(filled.map((s) => full.recipes[s.recipe_id].book_id)).size} books</div>
       <div class="mini">${filled.slice(0, 14).map((s) => `<i title="${esc(full.recipes[s.recipe_id].name)}" style="--book:${bookColour(full.recipes[s.recipe_id])}"></i>`).join('')}</div>
-      <div class="small">${(p.theme.chips || []).map((ch) => `<span class="chip ${ch.type} ${ch.exclude ? 'exclude' : ''}" style="font-size:.72rem">${chipLabel(ch)}</span>`).join(' ')}</div>
+      <div class="small">${(p.theme.chips || []).map((ch) => `<span class="chip ${chipClass(ch)} ${ch.exclude ? 'exclude' : ''}" style="font-size:.72rem">${chipLabel(ch)}</span>`).join(' ')}</div>
       <div class="row" style="margin-top:.8rem"><button class="btn sm go" data-open>Open</button><button class="btn sm" data-copy>Use again</button><span class="spacer"></span><button class="btn sm ghost" data-del>🗑️</button></div></div>`);
     $('[data-open]', c).onclick = () => {
-      plan = { name: full.name, planId: full.id, theme: { ...blankPlan().theme, ...full.theme }, slots: full.slots, recipes: full.recipes, warnings: [] };
+      plan = cleanPlan({ name: full.name, planId: full.id, theme: { ...blankPlan().theme, ...full.theme }, slots: full.slots, recipes: full.recipes, warnings: [] });
       savePlanLocal();
       location.hash = '#/plan';
     };
     $('[data-copy]', c).onclick = () => {
       plan = { name: '', planId: null, theme: { ...blankPlan().theme, ...full.theme, start: nextMonday() }, slots: full.slots.map((s) => ({ ...s, cooked: false })), recipes: full.recipes, warnings: [] };
+      plan = cleanPlan(plan);
       savePlanLocal();
       toast('Copied into a new week. Tweak away!');
       location.hash = '#/plan';
@@ -947,6 +1004,7 @@ function listen() {
     } else if (ev.type === 'book-added') {
       toast(`📚 New book on the shelf: <b>${esc(ev.book.title)}</b>`);
     }
+    if (ev.type === 'current-plan' && ev.client !== CLIENT_ID) applyRemotePlan(ev.version);
     if (['recipes-added', 'library-changed', 'book-added'].includes(ev.type)) {
       refreshMeta().catch(() => {});
       const name = location.hash.replace(/^#\/?/, '').split('/')[0];
@@ -959,4 +1017,4 @@ initThemeToggle($('.theme-toggle'));
 $('.brand').innerHTML = `${monsterSvg()}<b>Recipe <span>Monster</span></b>`;
 window.addEventListener('hashchange', route);
 listen();
-route();
+loadSharedPlan().then(route);
