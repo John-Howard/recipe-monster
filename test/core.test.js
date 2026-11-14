@@ -6,7 +6,7 @@ import { normaliseIsbn } from '../server/isbn.js';
 import { openDb, Store } from '../server/db.js';
 import { generatePlan, rerollSlot } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
-import { lanUrls } from '../server/index.js';
+import { lanUrls, isCrossSite } from '../server/index.js';
 import { downloadCover, findCover, isLocalCover, removeLocalCover } from '../server/covers.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -230,4 +230,25 @@ test('findCover ignores a local cover_url and removeLocalCover is safe', async (
   removeLocalCover('/covers/keep.jpg', dir);
   assert.ok(!fs.existsSync(keep));
   fs.rmSync(outside);
+});
+
+test('countBooksWithCover counts books sharing a cover', () => {
+  const s = new Store(openDb(':memory:'));
+  const a = s.saveBook({ title: 'A', cover_url: '/covers/x.jpg' });
+  s.saveBook({ title: 'B', cover_url: '/covers/x.jpg' });
+  assert.equal(s.countBooksWithCover('/covers/x.jpg'), 2);
+  s.setBookCover(a, '/covers/y.jpg');
+  assert.equal(s.countBooksWithCover('/covers/x.jpg'), 1);
+  assert.equal(s.countBooksWithCover('/covers/none.jpg'), 0);
+});
+
+test('isCrossSite blocks cross-site browsers and foreign origins only', () => {
+  assert.equal(isCrossSite({ 'sec-fetch-site': 'cross-site', host: 'a:3000' }), true);
+  assert.equal(isCrossSite({ 'sec-fetch-site': 'same-origin', origin: 'https://evil.example', host: 'a:3000' }), false);
+  for (const v of ['same-origin', 'none']) assert.equal(isCrossSite({ 'sec-fetch-site': v }), false);
+  assert.equal(isCrossSite({ 'sec-fetch-site': 'same-site' }), true);
+  assert.equal(isCrossSite({ origin: 'https://evil.example', host: 'a:3000' }), true);
+  assert.equal(isCrossSite({ origin: 'http://a:3000', host: 'a:3000' }), false);
+  assert.equal(isCrossSite({ origin: 'null', host: 'a:3000' }), true);
+  assert.equal(isCrossSite({ host: 'a:3000' }), false);
 });

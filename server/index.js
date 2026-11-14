@@ -19,8 +19,23 @@ const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
 const COVERS_DIR = path.join(DATA_DIR, 'covers');
 fs.mkdirSync(COVERS_DIR, { recursive: true });
 
+export function isCrossSite(headers) {
+  const site = headers['sec-fetch-site'];
+  if (site) return !['same-origin', 'none'].includes(site);
+  if (!headers.origin) return false;
+  try {
+    return new URL(headers.origin).host !== headers.host;
+  } catch {
+    return true;
+  }
+}
+
 export function createApp(store) {
   const app = express();
+  app.use('/api', (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || !isCrossSite(req.headers)) return next();
+    res.status(403).json({ error: 'Cross-site request blocked' });
+  });
   app.use(express.json({ limit: '25mb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/covers', express.static(COVERS_DIR, { maxAge: '30d' }));
@@ -62,7 +77,7 @@ export function createApp(store) {
     const url = await findCover(book, COVERS_DIR);
     if (!url) return book;
     store.setBookCover(bookId, url);
-    if (refresh) removeLocalCover(book.cover_url, COVERS_DIR);
+    if (refresh && !store.countBooksWithCover(book.cover_url)) removeLocalCover(book.cover_url, COVERS_DIR);
     return store.getBook(bookId);
   };
   const wantsRefresh = (req) => req.query.refresh === '1';
