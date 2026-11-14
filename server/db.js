@@ -149,6 +149,15 @@ export class Store {
     });
   }
 
+  // A phone that lost its connection may send "create this book" twice. Treat an identical book created in
+  // the last few minutes as the same one.
+  recentDuplicateBook({ title, isbn }) {
+    const row = this.db
+      .prepare(`SELECT id FROM books WHERE lower(title) = lower(?) AND isbn = ? AND created_at >= datetime('now', '-5 minutes') ORDER BY id DESC LIMIT 1`)
+      .get(String(title || '').trim(), String(isbn || '').trim());
+    return row ? row.id : null;
+  }
+
   deleteBook(id) {
     this.tx(() => {
       const ids = this.db.prepare('SELECT id FROM recipes WHERE book_id = ?').all(id).map((r) => r.id);

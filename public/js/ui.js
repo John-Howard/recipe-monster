@@ -1,14 +1,72 @@
 // Shared bits: API calls, the monster, toasts, modals, confetti and the theme-chip picker.
 
-export async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Phones on Wi-Fi drop connections more than you'd think (sleeping, switching to the camera, roaming
+// between access points). Network-level failures are retried with a short back-off; real errors from
+// the server (4xx/5xx) are not.
+export async function api(path, { method = 'GET', body, retries = 3 } = {}) {
+  const payload = body !== undefined ? JSON.stringify(body) : undefined;
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(path, {
+        method,
+        headers: payload !== undefined ? { 'Content-Type': 'application/json' } : {},
+        body: payload,
+        cache: 'no-store',
+      });
+    } catch (err) {
+      if (attempt < retries) {
+        await waitForVisible();
+        await sleep([600, 1500, 3500, 6000][attempt] ?? 6000);
+        continue;
+      }
+      throw new Error(`Lost the connection to Recipe Monster (${location.host}). Check the computer running it is awake and your phone is on the same Wi-Fi, then try again.`);
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
+    return data;
+  }
+}
+
+// Don't burn retries while the phone is locked or the browser is in the background.
+function waitForVisible() {
+  if (document.visibilityState === 'visible') return Promise.resolve();
+  return new Promise((resolve) => {
+    const on = () => {
+      if (document.visibilityState === 'visible') {
+        document.removeEventListener('visibilitychange', on);
+        resolve();
+      }
+    };
+    document.addEventListener('visibilitychange', on);
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+}
+
+// Start a slow server job (AI reading) and keep checking until it finishes. Each check is a quick
+// request, so a connection that drops mid-way just means the next check picks up the result.
+export async function runJob(path, body, { onTick, timeoutMs = 5 * 60_000 } = {}) {
+  const { job } = await api(path, { method: 'POST', body });
+  const start = Date.now();
+  let misses = 0;
+  while (Date.now() - start < timeoutMs) {
+    await sleep(1500);
+    await waitForVisible();
+    let j;
+    try {
+      j = await api(`/api/jobs/${job}`, { retries: 1 });
+      misses = 0;
+    } catch (e) {
+      if (e.status) throw e; // the server answered with a real error (e.g. job expired)
+      if (++misses >= 10) throw e; // about 30+ seconds without reaching the computer
+      continue;
+    }
+    if (j.status === 'done') return j.result;
+    if (j.status === 'error') throw new Error(j.error);
+    onTick?.(Math.round((Date.now() - j.started) / 1000));
+  }
+  throw new Error('Reading took too long. Try again, or use a smaller/closer photo.');
 }
 
 export const $ = (sel, root = document) => root.querySelector(sel);

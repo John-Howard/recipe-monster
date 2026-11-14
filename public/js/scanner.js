@@ -1,6 +1,6 @@
 // The scan flow: pick/create a book (barcode, cover photo or typing), photograph index pages,
 // review what was read, save. Works on a phone (camera) or a computer (file upload).
-import { api, h, esc, $, $$, toast, modal, chomp, confetti, monsterSvg, quip, fileToDataUrl, loadScript, bookColour } from './ui.js';
+import { api, runJob, h, esc, $, $$, toast, modal, chomp, confetti, monsterSvg, quip, fileToDataUrl, loadScript, bookColour } from './ui.js';
 
 const TESSERACT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 const ZXING = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
@@ -68,7 +68,7 @@ export function mountScanner(root, { bookId = null, compact = false } = {}) {
         status.textContent = '🤖 Reading the cover…';
         try {
           const image = await fileToDataUrl(file, { maxSide: 1400 });
-          const [meta, cover] = await Promise.all([api('/api/scan/book', { method: 'POST', body: { image } }), api('/api/covers', { method: 'POST', body: { image } })]);
+          const [meta, cover] = await Promise.all([runJob('/api/scan/book', { image }), api('/api/covers', { method: 'POST', body: { image } })]);
           bookForm({ ...meta, authors: (meta.authors || []).join(', '), cover_url: cover.url, tags: meta.suggested_tags });
         } catch (err) {
           status.textContent = '';
@@ -342,7 +342,16 @@ export function mountScanner(root, { bookId = null, compact = false } = {}) {
           p.label = '🤖 Reading…';
           drawPage(p);
           const image = await fileToDataUrl(p.file, { maxSide: 2000, rotate: p.rotation || 0 });
-          const r = await api('/api/scan/index', { method: 'POST', body: { image } });
+          p.label = '🤖 Sending…';
+          drawPage(p);
+          const r = await runJob('/api/scan/index', { image }, {
+            onTick: (secs) => {
+              if (stale()) return;
+              p.label = `🤖 Reading… ${secs}s`;
+              p.progress = Math.min(0.95, secs / 40);
+              drawPage(p);
+            },
+          });
           if (stale()) return;
           p.entries = r.entries;
           p.text = '';

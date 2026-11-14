@@ -23,6 +23,12 @@ Your data lives in `data/recipe-monster.db` (plus `data/covers/` for cover photo
 
 > There's no login: anyone on your home network can open the app. Don't expose the port to the internet.
 
+**Phone says "network connection lost" or can't connect?**
+- Make sure the computer running Recipe Monster isn't asleep. Set it to stay awake while plugged in, at least while you're scanning.
+- Phone and computer must be on the same Wi-Fi. Turn off mobile data / "Wi-Fi Assist" if the phone keeps switching away, and avoid guest networks, which often block devices from seeing each other.
+- If the page won't load at all, the computer's firewall may be blocking port 3000. Allow Node.js through it (on Windows, choose "Private networks" when asked).
+- The app retries dropped requests by itself, and AI page reads carry on even if the phone sleeps or loses Wi-Fi mid-read. Any page that still fails shows a **Retry** button.
+
 ## Reading index pages: AI or on-phone OCR
 
 | | How | Quality |

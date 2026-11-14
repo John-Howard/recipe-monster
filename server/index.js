@@ -55,6 +55,8 @@ export function createApp(store) {
   // ---- books ----
   app.get('/api/books', wrap(() => store.listBooks()));
   app.post('/api/books', wrap((req) => {
+    const dup = store.recentDuplicateBook(req.body);
+    if (dup) return store.getBook(dup);
     const bookId = store.saveBook(req.body);
     const book = store.getBook(bookId);
     broadcast({ type: 'book-added', book: { id: book.id, title: book.title } });
@@ -139,13 +141,31 @@ export function createApp(store) {
   // ---- scanning ----
   app.get('/api/isbn/:isbn', wrap(async (req) => lookupIsbn(req.params.isbn)));
   app.post('/api/scan/parse', wrap((req) => ({ entries: parseIndexText(req.body.text || ''), via: 'ocr' })));
-  app.post('/api/scan/index', wrap(async (req) => {
-    if (!aiEnabled()) throw new Error('AI reading is not set up on the server (set ANTHROPIC_API_KEY). Use on-phone OCR instead.');
-    return { entries: await extractIndex(req.body.image), via: 'ai' };
+  // AI reads can take a while, so they run as background jobs. The phone gets a job id straight away
+  // and checks back, which means a dropped Wi-Fi connection or a phone that went to sleep doesn't lose the result.
+  const jobs = new Map();
+  const startJob = (work) => {
+    const jobId = crypto.randomUUID();
+    const job = { status: 'working', started: Date.now() };
+    jobs.set(jobId, job);
+    work()
+      .then((result) => Object.assign(job, { status: 'done', result }))
+      .catch((e) => Object.assign(job, { status: 'error', error: e.message || String(e) }))
+      .finally(() => setTimeout(() => jobs.delete(jobId), 30 * 60 * 1000).unref());
+    return { job: jobId };
+  };
+  app.get('/api/jobs/:job', wrap((req) => {
+    const job = jobs.get(req.params.job);
+    if (!job) throw Object.assign(new Error('That reading job has expired. Please read the page again.'), { status: 404 });
+    return job;
   }));
-  app.post('/api/scan/book', wrap(async (req) => {
+  app.post('/api/scan/index', wrap((req) => {
+    if (!aiEnabled()) throw new Error('AI reading is not set up on the server (set ANTHROPIC_API_KEY). Use on-phone OCR instead.');
+    return startJob(async () => ({ entries: await extractIndex(req.body.image), via: 'ai' }));
+  }));
+  app.post('/api/scan/book', wrap((req) => {
     if (!aiEnabled()) throw new Error('AI reading is not set up on the server (set ANTHROPIC_API_KEY).');
-    return extractBook(req.body.image);
+    return startJob(() => extractBook(req.body.image));
   }));
   app.post('/api/covers', wrap((req) => {
     const m = String(req.body.image || '').match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
@@ -187,11 +207,17 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     const { seedDemo } = await import('./seed-demo.js');
     seedDemo(store);
   }
-  createApp(store).listen(PORT, '0.0.0.0', () => {
+  const server = createApp(store).listen(PORT, '0.0.0.0', () => {
     const urls = lanUrls();
     console.log(`\n  🍲  Recipe Monster is hungry and listening!\n`);
     console.log(`  On this computer:  http://localhost:${PORT}`);
     for (const u of urls) console.log(`  On your phone:     ${u}/scan.html`);
     console.log(`  AI page reading:   ${aiEnabled() ? 'ON (Claude vision)' : 'off: set ANTHROPIC_API_KEY to enable; on-phone OCR is used instead'}\n`);
   });
+  // Node closes idle keep-alive connections after 5s by default. Safari (especially on iPhone) often reuses
+  // a connection just as the server closes it, which shows up as "The network connection was lost".
+  // Keep idle connections open for longer than browsers do, and allow slow uploads over patchy Wi-Fi.
+  server.keepAliveTimeout = 120_000;
+  server.headersTimeout = 125_000;
+  server.requestTimeout = 10 * 60_000;
 }
