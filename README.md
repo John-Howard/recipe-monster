@@ -50,7 +50,13 @@ Tips: good light, one page per photo, book held flat, page filling the frame.
 
 ## Courses
 
-Every recipe has one course (starter, main, dessert, side, breakfast or other), kept separate from its tags. It is first guessed from the name by simple rules, and the planner uses it so dinners are real mains and puddings are real desserts. With `ANTHROPIC_API_KEY` set, new recipes are also classified by Claude in the background, and **🍽️ Re-check courses with AI** in the library tools redoes the whole shelf. Changing a recipe's course yourself locks it in: neither the rules nor the AI will overwrite it.
+Every recipe has one course (starter, main, dessert, side, breakfast, snack or other), kept separate from its tags. It is first guessed from the name by simple rules, and the planner uses it so dinners are real mains and puddings are real desserts. With `ANTHROPIC_API_KEY` set, new recipes are also classified by Claude in the background, and **🍽️ Re-check courses with AI** in the library tools redoes the whole shelf. Changing a recipe's course yourself locks it in: neither the rules nor the AI will overwrite it.
+
+Snacks (trail mix, crackers, popcorn, bliss balls, flapjacks...) have their own course. Recipes whose course came from the rules are re-guessed on every start; AI and hand-set courses are left alone, so run **Re-check courses with AI** once to move older AI-classified snacks across. The planner doesn't schedule snacks.
+
+## Managing tags
+
+Tags are edited as pills in the recipe dialog (Enter or comma to add, × to remove, with suggestions from your existing tags). **🏷️ Manage tags** in the library tools lists every tag with its recipe and book counts, and lets you rename (renaming to an existing tag merges them) or delete it everywhere. On the Find page, tick recipes (or Select all) and use the bar at the bottom to add or remove a tag on all of them. None of this touches courses.
 
 ## Themes
 

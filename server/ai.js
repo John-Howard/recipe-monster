@@ -108,7 +108,8 @@ Give each recipe exactly one course:
 - dessert: a sweet pudding or treat
 - side: an accompaniment (vegetable side, plain salad)
 - breakfast
-- other: baking, sauces, drinks, snacks, spreads, condiments
+- snack: a small savoury or sweet bite eaten between meals (trail mix, crackers, popcorn, energy or bliss balls, nut bites, roasted nuts, crisps, fridge bars eaten as a snack, dips with crackers)
+- other: baking, sauces, drinks, spreads, condiments
 
 Recipes (id: name):
 ${batch.map((r) => `${r.id}: ${r.name}`).join('\n')}`;

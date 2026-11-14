@@ -31,6 +31,7 @@ export function validatePlan(plan) {
   if (JSON.stringify(plan).length > MAX_BYTES) return 'Plan is too large';
   const themeError = validateTheme(plan.theme);
   if (themeError) return themeError;
+  if (plan.recipes !== undefined && (!plan.recipes || typeof plan.recipes !== 'object' || Array.isArray(plan.recipes))) return 'recipes must be an object';
   if (plan.slots === undefined) return null;
   if (!Array.isArray(plan.slots) || plan.slots.length > 200) return 'slots must be an array of at most 200';
   return plan.slots.some(badSlot) ? 'plan has an invalid slot' : null;
