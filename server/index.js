@@ -335,6 +335,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const server = tls
     ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, app)
     : http.createServer(app);
+  if (tls) server.on('tlsClientError', (err, socket) => console.warn('TLS client error', socket.remoteAddress, err.code || err.message));
+  if (process.env.LOG_REQUESTS === '1') {
+    server.on('request', (req, res) => {
+      res.on('finish', () => console.log(req.method, req.url, res.statusCode, req.socket.remoteAddress, String(req.headers['user-agent'] || '').slice(0, 60)));
+    });
+  }
   server.listen(PORT, '0.0.0.0', () => {
     const urls = lanUrls();
     console.log(`\n  🍲  Recipe Monster is hungry and listening!\n`);

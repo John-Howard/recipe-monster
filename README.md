@@ -97,6 +97,8 @@ If the Mac's LAN IP changes, re-run `scripts/make-cert.sh` and update `PUBLIC_UR
 
 Outside Docker, set `TLS_CERT` and `TLS_KEY` (file paths) to serve HTTPS, and `PUBLIC_URL` (comma-separated base URLs) to override the addresses shown for phones.
 
+Set `LOG_REQUESTS=1` to log every request (method, path, status, client address, user agent); TLS handshake failures are always logged.
+
 ## Project layout
 
 ```
