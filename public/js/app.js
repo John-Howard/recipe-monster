@@ -2,6 +2,7 @@ import {
   api, runJob, $, $$, h, esc, debounce, toast, modal, confirmBox, confetti, chomp, monsterSvg, quip,
   chipInput, chipLabel, chipClass, bookColour, tagPills, MEAL_EMOJI, initThemeToggle, loadScript,
 } from './ui.js';
+import { play, initSoundToggle } from './sounds.js';
 import { mountScanner } from './scanner.js';
 import { loadTagList, tagEditor, manageTags, selectionBar } from './tags.js';
 
@@ -448,12 +449,14 @@ async function viewPlan() {
       nameEl.textContent = r.name;
       el.classList.remove('spinning');
       el.classList.add('landed');
+      play('land');
     }, delay);
   }
 
   async function generate(keepLocks = false) {
     const btn = $('[data-generate]', el);
     btn.disabled = true;
+    play('unlock');
     try {
       const body = { theme: plan.theme, slots: keepLocks && plan.slots.length ? plan.slots : null };
       if (!keepLocks && plan.slots.some((s) => s.locked)) {
@@ -470,7 +473,9 @@ async function viewPlan() {
       drawBoard(true);
       const filled = r.slots.filter((s) => s.recipe_id).length;
       if (filled) {
+        play('spin', 450 + filled * 110);
         setTimeout(() => {
+          play('chomp');
           confetti();
           chomp($('.hero', view));
           $('.hero .bubble', view).innerHTML = quip('generated');
@@ -492,6 +497,7 @@ async function viewPlan() {
   }
 
   async function reroll(idx) {
+    play('unlock');
     try {
       const r = await api('/api/plan/reroll', { method: 'POST', body: { theme: plan.theme, slots: plan.slots, index: idx } });
       plan.slots[idx] = { ...r.slot, locked: false };
@@ -500,6 +506,7 @@ async function viewPlan() {
       savePlanLocal();
       spinCount = 0;
       drawBoard();
+      play('reroll');
       const cell = $$('.slot', board).find((c) => c.querySelector('.name')?.textContent === plan.recipes[plan.slots[idx].recipe_id]?.name);
       if (cell) spinSlot(cell, plan.recipes[plan.slots[idx].recipe_id]);
     } catch (e) {
@@ -520,12 +527,14 @@ async function viewPlan() {
   }
 
   async function savePlan() {
+    play('unlock');
     const body = { name: plan.name || defaultName(), week_start: plan.theme.start, theme: plan.theme, slots: plan.slots };
     try {
       const saved = plan.planId ? await api(`/api/plans/${plan.planId}`, { method: 'PUT', body }) : await api('/api/plans', { method: 'POST', body });
       plan.planId = saved.id;
       plan.name = saved.name;
       savePlanLocal();
+      play('burp');
       toast(`💾 Saved “${esc(saved.name)}”`);
       drawBoard();
     } catch (e) {
@@ -1050,7 +1059,8 @@ function listen() {
   };
 }
 
-initThemeToggle($('.theme-toggle'));
+initThemeToggle($('.theme-toggle:not(.sound-toggle)'));
+initSoundToggle($('.sound-toggle'));
 $('.brand').innerHTML = `${monsterSvg()}<b>Recipe <span>Monster</span></b>`;
 window.addEventListener('hashchange', route);
 listen();
