@@ -516,7 +516,7 @@ async function viewPlan() {
 
   function pickFor(idx) {
     const s = plan.slots[idx];
-    recipePicker(`${MEAL_EMOJI[s.meal]} Choose ${MEAL_LABEL[s.meal].toLowerCase()}`, plan.theme.chips, (r) => {
+    recipePicker(`${MEAL_EMOJI[s.meal]} Choose ${MEAL_LABEL[s.meal].toLowerCase()}`, plan.theme.chips, s.meal, (r) => {
       s.recipe_id = r.id;
       s.cooked = false;
       plan.recipes[r.id] = r;
@@ -566,18 +566,25 @@ async function viewPlan() {
 }
 
 // ---------------- reusable recipe picker (search modal) ----------------
-function recipePicker(title, themeChips, onPick) {
+// meal: the slot being filled. Results are limited to recipes that suit it (mains for the main meal,
+// puddings for pudding…), with a switch to show everything for the odd exception.
+const PICKER_MEAL_LABEL = { breakfast: 'breakfast recipes', lunch: 'lunch-type recipes', starter: 'starters', dinner: 'main meals', dessert: 'puddings' };
+function recipePicker(title, themeChips, meal, onPick) {
   const body = h(`<div class="stack">
     <div class="searchbar"><input type="search" placeholder="Search recipes, ingredients, books…" aria-label="Search"><button class="btn go">Search</button></div>
-    ${themeChips?.length ? '<label class="toggle"><input type="checkbox" checked data-theme> Stick to this week\'s theme</label>' : ''}
+    <div class="row" style="gap:1.2rem">
+      ${meal ? `<label class="toggle"><input type="checkbox" checked data-meal> Only ${esc(PICKER_MEAL_LABEL[meal] || meal)}</label>` : ''}
+      ${themeChips?.length ? '<label class="toggle"><input type="checkbox" checked data-theme> Stick to this week\'s theme</label>' : ''}
+    </div>
     <div class="results" style="max-height:55vh;overflow:auto;padding:4px"></div></div>`);
   const m = modal(title, body, { wide: true });
   const input = $('input[type=search]', body);
   const results = $('.results', body);
   const run = debounce(async () => {
     const useTheme = $('[data-theme]', body)?.checked;
-    const rows = await api('/api/search', { method: 'POST', body: { q: input.value, filters: useTheme ? themeChips : [], limit: 80 } });
-    results.innerHTML = rows.length ? '' : '<p class="muted">No matches. Try fewer words, or untick the theme.</p>';
+    const onlyMeal = $('[data-meal]', body)?.checked;
+    const rows = await api('/api/search', { method: 'POST', body: { q: input.value, filters: useTheme ? themeChips : [], meal: onlyMeal ? meal : null, limit: 80 } });
+    results.innerHTML = rows.length ? '' : `<p class="muted">No matches. Try fewer words${onlyMeal ? `, or untick “Only ${esc(PICKER_MEAL_LABEL[meal] || meal)}”` : ''}${useTheme ? ', or untick the theme' : ''}.</p>`;
     for (const r of rows) {
       const c = h(`<div class="rcard" style="--book:${bookColour(r)}"><div class="name">${esc(r.name)}</div>
         <div class="small muted">📖 ${esc(r.book_title)}${r.page ? ` · p.${esc(r.page)}` : ''}</div><div>${tagPills(r, 4)}</div>
@@ -589,6 +596,7 @@ function recipePicker(title, themeChips, onPick) {
   input.oninput = run;
   $('.btn.go', body).onclick = run;
   $('[data-theme]', body)?.addEventListener('change', run);
+  $('[data-meal]', body)?.addEventListener('change', run);
   run();
 }
 

@@ -729,3 +729,15 @@ test('current plan never stores client recipes; GET rebuilds them from the datab
     server.close();
   }
 });
+
+test('search can be limited to one meal slot (manual picking uses the same rules as the generator)', () => {
+  const s = demoStore();
+  const all = s.search({ limit: 1000 });
+  const mains = s.search({ meal: 'dinner', limit: 1000 });
+  assert.ok(mains.length > 0 && mains.length < all.length);
+  assert.ok(mains.every((r) => r.course === 'main'), 'only main courses for the main meal');
+  const puds = s.search({ meal: 'dessert', limit: 1000 });
+  assert.ok(puds.length > 0 && puds.every((r) => r.course === 'dessert'));
+  const mainSearch = s.search({ q: 'pudding', meal: 'dinner', limit: 1000 });
+  assert.ok(mainSearch.every((r) => r.course === 'main'));
+});

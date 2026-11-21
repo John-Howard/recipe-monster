@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validatePlan } from './validatePlan.js';
-import { autoTags, guessCourse, COURSES } from './tagger.js';
+import { autoTags, guessCourse, COURSES, mealFits } from './tagger.js';
 
 const DATA_DIR = process.env.RECIPE_MONSTER_DATA || path.resolve('data');
 
@@ -424,7 +424,8 @@ export class Store {
   }
 
   // ---------- search ----------
-  search({ q = '', filters = [], favourites = false, limit = 200 } = {}) {
+  // meal: only recipes that suit that meal slot (same rules the week generator uses), e.g. 'dinner' = mains.
+  search({ q = '', filters = [], favourites = false, meal = null, limit = 200 } = {}) {
     let ids = null;
     const text = String(q).trim();
     if (text) {
@@ -455,6 +456,7 @@ export class Store {
     }
     rows = applyFilters(rows, filters);
     if (favourites) rows = rows.filter((r) => r.favourite);
+    if (meal) rows = rows.filter((r) => mealFits(r, meal));
     return rows.slice(0, limit);
   }
 
