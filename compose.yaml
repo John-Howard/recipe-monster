@@ -2,20 +2,26 @@ services:
   recipe-monster:
     build: .
     container_name: recipe-monster
-    ports:
-      - "3443:3443"
     volumes:
       - ./data:/data
-      - ./certs:/certs:ro
     env_file:
       - path: .env
         required: false
     environment:
-      TLS_CERT: /certs/cert.pem
-      TLS_KEY: /certs/key.pem
-      PUBLIC_URL: ${PUBLIC_URL:-https://localhost:3443}
+      PORT: 3000
+      PUBLIC_URL: ${PUBLIC_URL:-https://recipe-monster.local}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
       RECIPE_MONSTER_MODEL: ${RECIPE_MONSTER_MODEL:-}
       LOG_REQUESTS: ${LOG_REQUESTS:-}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.11.7-alpine
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+    depends_on: [recipe-monster]
     restart: unless-stopped
