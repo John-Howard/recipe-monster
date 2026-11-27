@@ -4,7 +4,7 @@ import { parseIndexText } from '../server/indexParser.js';
 import { autoTags, guessCourse, mealFits } from '../server/tagger.js';
 import { applyCourseResults } from '../server/ai.js';
 import http from 'node:http';
-import { normaliseIsbn } from '../server/isbn.js';
+import { normaliseIsbn, googleBooksUrl } from '../server/isbn.js';
 import { openDb, Store } from '../server/db.js';
 import { generatePlan, rerollSlot, emptySlots, isWeekend } from '../server/planner.js';
 import { seedDemo } from '../server/seed-demo.js';
@@ -50,6 +50,11 @@ test('ISBN validation', () => {
   assert.equal(normaliseIsbn('978-0-14-103614-4'), '9780141036144');
   assert.equal(normaliseIsbn('9780141036145'), null);
   assert.equal(normaliseIsbn('0-306-40615-2'), '0306406152');
+});
+
+test('Google Books URL adds the API key only when one is set', () => {
+  assert.ok(!googleBooksUrl('9780141036144', '').includes('key='));
+  assert.ok(googleBooksUrl('9780141036144', 'abc').endsWith('&key=abc'));
 });
 
 function demoStore() {
