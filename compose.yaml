@@ -15,6 +15,7 @@ services:
       TLS_KEY: /certs/key.pem
       PUBLIC_URL: ${PUBLIC_URL:-https://localhost:3443}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
       RECIPE_MONSTER_MODEL: ${RECIPE_MONSTER_MODEL:-}
       LOG_REQUESTS: ${LOG_REQUESTS:-}
     restart: unless-stopped

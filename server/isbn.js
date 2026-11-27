@@ -13,6 +13,11 @@ export function normaliseIsbn(raw) {
   return null;
 }
 
+export function googleBooksUrl(isbn, key = process.env.GOOGLE_BOOKS_API_KEY) {
+  const base = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+  return key ? `${base}&key=${encodeURIComponent(key)}` : base;
+}
+
 async function getJson(url) {
   const res = await fetch(url, { headers: { 'User-Agent': 'RecipeMonster/1.0 (home cookbook catalogue)' }, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`${res.status} from ${new URL(url).host}`);
@@ -42,7 +47,7 @@ export async function lookupIsbn(raw) {
     errors.push(e.message);
   }
   try {
-    const data = await getJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const data = await getJson(googleBooksUrl(isbn));
     const v = data.items?.[0]?.volumeInfo;
     if (v) {
       return {

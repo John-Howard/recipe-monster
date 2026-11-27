@@ -85,6 +85,8 @@ PUBLIC_URL=https://<lan-ip>:3443 docker compose up -d --build
 
 Open https://localhost:3443 on the Mac. Your library lives in `./data`; `ANTHROPIC_API_KEY` and `RECIPE_MONSTER_MODEL` are read from the environment or a `.env` file.
 
+`GOOGLE_BOOKS_API_KEY` is optional and avoids 429 quota errors on the Google Books ISBN fallback (create a key in Google Cloud Console with the Books API enabled).
+
 To pull the API key from 1Password instead (nothing secret is written to disk; `.env.1password` only holds an `op://` reference):
 
 ```
