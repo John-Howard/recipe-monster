@@ -1,0 +1,11 @@
+# HTTPS front door for any hostname (recipe-monster.local, localhost, LAN IP).
+# Certificates come from `make certs` (mkcert); see README.md.
+# Server-sent events are flushed immediately and there is no request body limit.
+
+https:// {
+	tls /certs/cert.pem /certs/key.pem
+
+	encode zstd gzip
+
+	reverse_proxy recipe-monster:3000
+}

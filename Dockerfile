@@ -4,8 +4,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY server/ server/
 COPY public/ public/
-ENV NODE_ENV=production RECIPE_MONSTER_DATA=/data PORT=3443
+ENV NODE_ENV=production RECIPE_MONSTER_DATA=/data PORT=3000
 RUN mkdir -p /data && chown node:node /data
-EXPOSE 3443
+EXPOSE 3000
 USER node
 CMD ["node", "--no-warnings", "server/index.js"]
