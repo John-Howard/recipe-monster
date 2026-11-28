@@ -9,7 +9,7 @@ HOST="${HOST:-recipe-monster.local}"
 
 lan_ip=$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)
 host="$(scutil --get LocalHostName).local"
-names=("$HOST" localhost 127.0.0.1 ::1 recipe-monster.orb.local "$host")
+names=("$HOST" localhost 127.0.0.1 ::1 "$host")
 [ -n "$lan_ip" ] && names+=("$lan_ip")
 
 mkcert -cert-file certs/cert.pem -key-file certs/key.pem "${names[@]}"
