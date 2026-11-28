@@ -1,11 +1,20 @@
 # HTTPS front door for any hostname (recipe-monster.local, localhost, LAN IP).
 # Certificates come from `make certs` (mkcert); see README.md.
-# Server-sent events are flushed immediately and there is no request body limit.
+# No `encode`: compression buffers server-sent events until the next write.
+# HTTP/3 is off because only TCP is published.
+# Upstream keepalive stays below Node's 120s keepAliveTimeout.
+{
+	servers {
+		protocols h1 h2
+	}
+}
 
 https:// {
 	tls /certs/cert.pem /certs/key.pem
 
-	encode zstd gzip
-
-	reverse_proxy recipe-monster:3000
+	reverse_proxy recipe-monster:3000 {
+		transport http {
+			keepalive 60s
+		}
+	}
 }

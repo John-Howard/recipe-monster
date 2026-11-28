@@ -81,7 +81,9 @@ Phone cameras only work on a secure origin, so a [Caddy](https://caddyserver.com
 ```
 brew install mkcert
 make certs
-# add this line to /etc/hosts:  127.0.0.1 recipe-monster.local
+# add these lines to /etc/hosts (the ::1 line avoids a 5s .local lookup delay on macOS):
+#   127.0.0.1 recipe-monster.local
+#   ::1       recipe-monster.local
 make up
 ```
 
@@ -99,7 +101,7 @@ If the Mac's LAN IP changes, re-run `make certs` and `make up`.
 
 Outside Docker, set `TLS_CERT` and `TLS_KEY` (file paths) to serve HTTPS, and `PUBLIC_URL` (comma-separated base URLs) to override the addresses shown for phones.
 
-Set `LOG_REQUESTS=1` to log every request (method, path, status, client address, user agent); TLS handshake failures are always logged.
+Set `LOG_REQUESTS=1` to log every request (method, path, status, client address, user agent); when Node serves TLS itself, handshake failures are always logged.
 
 ## Project layout
 
