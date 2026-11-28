@@ -107,6 +107,11 @@ test('lanUrls uses PUBLIC_URL when set, stripping trailing slashes', () => {
   assert.deepEqual(lanUrls({ env }), ['https://192.168.1.162:3443', 'https://mac.local:3443']);
 });
 
+test('lanUrls drops PUBLIC_URL entries without a hostname', () => {
+  assert.deepEqual(lanUrls({ env: { PUBLIC_URL: 'https://recipe-monster.local:8443,https://:8443' } }), ['https://recipe-monster.local:8443']);
+  assert.deepEqual(lanUrls({ env: { PUBLIC_URL: 'https://recipe-monster.local,https://' } }), ['https://recipe-monster.local']);
+});
+
 test('lanUrls scans interfaces with http, or https when TLS is on', () => {
   const plain = lanUrls({ env: {}, port: 3000 });
   assert.ok(plain.every((u) => u.startsWith('http://') && u.endsWith(':3000')));

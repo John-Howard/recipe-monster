@@ -310,8 +310,16 @@ export function createApp(store, { classify = classifyCourses } = {}) {
   return app;
 }
 
+function hasHostname(u) {
+  try {
+    return Boolean(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function lanUrls({ port = PORT, env = process.env } = {}) {
-  if (env.PUBLIC_URL) return env.PUBLIC_URL.split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean);
+  if (env.PUBLIC_URL) return env.PUBLIC_URL.split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(hasHostname);
   const scheme = env.TLS_CERT && env.TLS_KEY ? 'https' : 'http';
   const urls = [];
   for (const list of Object.values(os.networkInterfaces())) {
